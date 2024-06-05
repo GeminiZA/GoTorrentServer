@@ -1,46 +1,12 @@
 package main
 
 import (
-	"fmt"
-
-	"github.com/GeminiZA/GoTorrentServer/internal/database"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentfile"
 )
 
 func main() {
-	db, err := database.Connect()
-	defer db.Disconnect()
-	if err != nil {
-		fmt.Println(err)
-		panic(err)
-	}
-
-	l, err := db.GetAllFiles()
-
+	_, err := torrentfile.ParseFile("test_folder-d984f67af9917b214cd8b6048ab5624c7df6a07a.torrent")
 	if err != nil {
 		panic(err)
 	}
-
-	for i, item := range l {
-		fmt.Printf("Index: %v Item: %v", i, item)
-	}
-
-	//tf := database.TargetFile {
-		//InfoHash: "asdf1123",
-		//Path: "./testpath.tf",
-		//Time: time.Now().String(),
-		//Description: "A Test TargetFile",
-		//TrackerURL: "http://example.com",
-	//}
-
-	//if err := db.AddFile(tf); err != nil {
-		//panic(err)
-	//}
-
-	
-	//if err := db.AddFile(tf); err != nil {
-		//panic(err)
-	//}
-
-
-
 }

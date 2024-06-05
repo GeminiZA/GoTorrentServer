@@ -5,6 +5,11 @@ import (
 	"os"
 )
 
+type Config struct {
+	DBPath string
+	
+}
+
 
 func ParseConfig() (map[string]interface{}, error) {
 	file, err := os.Open("config.json")

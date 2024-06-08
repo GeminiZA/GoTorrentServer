@@ -2,138 +2,32 @@ package torrentfile
 
 import (
 	"errors"
-	"fmt"
 	"os"
 )
 
-type FilePath = []string
-
 type FileInfo struct {
+	Path   []string
 	Length uint64
-	Path   FilePath
 }
 
 type TorrentInfo struct {
 	Name        string
-	PieceLength uint32 //bytes
+	PieceLength uint64
 	Pieces      [][]byte
-	MultiFile   bool
-	Files       []FileInfo
+	Private     bool
 	Length      uint64
+	Files       []FileInfo
+	MultiFile	bool
 }
 
 type TorrentFile struct {
-	Data		 []byte
 	Announce     string
 	AnnounceList [][]string
-	Info         TorrentInfo
-	CreationDate string
+	CreationDate uint64
 	Comment      string
 	CreatedBy    string
-}
-
-type TokenType int
-
-const (
-	String TokenType = iota
-	Integer
-	List
-	Dictionary
-	EndOfList
-	EndOfDictionary
-)
-
-type Token struct {
-	Type TokenType
-	Value []byte
-}
-
-func (tf *TorrentFile) Tokenize() (*[]Token, error) {
-	curContainers := []Token{}
-	tokens := []Token{}
-	i := 0
-	for i < len(tf.Data) {
-		if tf.Data[i] == 'd' {
-			tokens = append(tokens, Token{Type: Dictionary, Value: []byte{}})
-			curContainers = append(curContainers, Token{Type: Dictionary, Value: []byte{}})
-		} else if tf.Data[i] == 'l' {
-			tokens = append(tokens, Token{Type: List, Value: []byte{}})
-			curContainers = append(curContainers, Token{Type: List, Value: []byte{}})
-		} else if tf.Data[i] == 'i' {
-			i++
-			newInt := Token{Type: Integer, Value: []byte{}}
-			for (tf.Data[i] != 'e') {
-				newInt.Value = append(newInt.Value, tf.Data[i])
-				i++
-			}
-			tokens = append(tokens, newInt)
-		} else if tf.Data[i] == 'e' {
-			if len(curContainers) > 0 && curContainers[len(curContainers)-1].Type == Dictionary {
-				tokens = append(tokens, Token{Type: EndOfDictionary, Value: []byte{}})
-				curContainers = curContainers[:len(curContainers) - 1]
-			} else if len(curContainers) > 0 && curContainers[len(curContainers)-1].Type == List {
-				tokens = append(tokens, Token{Type: EndOfList, Value: []byte{}})
-				curContainers = curContainers[:len(curContainers) - 1]
-			} 
-		} else { //byte string
-			newString := Token{Type: String, Value: []byte{}}
-			if tf.Data[i] < '0' || tf.Data[i] > '9' {
-				return nil, errors.New("invalid byte in data")
-			}
-			stringLength := 0
-			for i < len(tf.Data) && tf.Data[i] != ':' {
-				stringLength = stringLength*10
-				stringLength += int(tf.Data[i] - '0')
-				i++
-			}
-			for j := 0; j < stringLength; j++ {
-				i++
-				newString.Value = append(newString.Value, tf.Data[i])
-			}
-			tokens = append(tokens, newString)
-		}
-		i++
-	}
-	return &tokens, nil
-}
-
-
-func PrintTokens(tokens *[]Token) {
-	for i := range *tokens {
-		curToken := (*tokens)[i]
-		var typeString string
-		switch curToken.Type {
-		case String:
-			typeString = "String"
-		case Integer:
-			typeString = "Integer"
-		case List:
-			typeString = "List"
-		case Dictionary:
-			typeString = "Dictionary"
-		case EndOfDictionary:
-			typeString = "EndOfDictionary"
-		case EndOfList:
-			typeString = "EndOfList"
-		}
-		if len(curToken.Value) > 0 {
-			fmt.Printf("%s (", typeString)
-			for _, val := range curToken.Value {
-				fmt.Printf("%c, ", val)
-			}
-			fmt.Printf(")\n")
-		} else {
-			fmt.Printf("%s\n", typeString)
-		}
-	}
-}
-
-func (*TorrentFile) parseList() {
-	
-}
-
-func (*TorrentFile) parseDict() {
-
+	Encoding     string
+	Info         TorrentInfo
 }
 
 func ParseFile(path string) (*TorrentFile, error) {
@@ -142,10 +36,110 @@ func ParseFile(path string) (*TorrentFile, error) {
 		return nil, err
 	}
 
-	err = Tokenize(&data)
-	
+	tokens, err := Tokenize(&data)
+
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+
+	dict, err := ParseDict(tokens)
+	if err != nil {
+		return nil, err
+	}
+	
+	var tf TorrentFile
+	var ok bool
+	tf.Announce, ok = dict["announce"].(string)
+	if !ok {
+		return nil, errors.New("no announce in file")
+	}
+	rawAnnounceList, ok := dict["announce-list"].([]interface{})
+	if ok {
+		for i := range rawAnnounceList {
+			tf.AnnounceList = append(tf.AnnounceList, make([]string, 0))
+			list, ok := rawAnnounceList[i].([]interface{})
+			if ok {
+				for j := range list {
+					item, ok := list[j].(string)
+					if ok {
+						tf.AnnounceList[len(tf.AnnounceList)-1] = append(tf.AnnounceList[len(tf.AnnounceList)-1], item)
+					}
+				}
+			}
+		}
+	}
+	tf.CreationDate, ok = dict["creation date"].(uint64)
+	if !ok {
+		return nil, errors.New("no creation date")
+	}
+	tf.Comment, _ = dict["comment"].(string)
+	tf.CreatedBy, ok = dict["created by"].(string)
+	if !ok {
+		return nil, errors.New("no created by")
+	}
+	tf.Encoding, _ = dict["encoding"].(string)
+	infoDict, ok := dict["info"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("no info")
+	}
+	tf.Info.Name, ok = infoDict["name"].(string)
+	if !ok {
+		return nil, errors.New("no name")
+	}
+	tf.Info.PieceLength, ok = infoDict["piece length"].(uint64)
+	if !ok {
+		return nil, errors.New("no piece length")
+	}
+	//pieces
+	piecesString, ok := infoDict["pieces"].(string)
+	if !ok {
+		return nil, errors.New("no pieces")
+	}
+	if len(piecesString) % 20 != 0 {
+		return nil, errors.New("pieces length not divisible by 20")
+	}
+	for i := 0; i < len(piecesString); i += 20 {
+		tf.Info.Pieces = append(tf.Info.Pieces, []byte(piecesString[i:i+20]))
+	}
+	privateBool, ok := infoDict["private"].(uint64)
+	if !ok {
+		return nil, errors.New("no private")
+	}
+	tf.Info.Private = privateBool != 0
+	length, ok := infoDict["length"].(uint64)
+	if ok {
+		tf.Info.Length = length
+		tf.Info.MultiFile = false
+	} else {
+		files, ok := infoDict["files"].([]interface{})
+		if !ok {
+			return nil, errors.New("no files or length")
+		}
+		tf.Info.MultiFile = true
+		for _, file := range files {
+			fileItem, ok := file.(map[string]interface{})
+			if !ok {
+				return nil, errors.New("invalid file item")
+			}
+			length, ok := fileItem["length"].(uint64)
+			if !ok {
+				return nil, errors.New("no length in file")
+			}
+			var pathList []string
+			pathListInterface, ok := fileItem["path"].([]interface{})
+			if !ok {
+				return nil, errors.New("no path in file")
+			}
+			for _, path := range pathListInterface {
+				pathString, ok := path.(string)
+				if !ok {
+					return nil, errors.New("invalid path list in file")
+				}
+				pathList = append(pathList, pathString)
+			}
+			tf.Info.Files = append(tf.Info.Files, FileInfo{Path: pathList, Length: length})
+		}
+	}
+
+	return &tf, nil
 }

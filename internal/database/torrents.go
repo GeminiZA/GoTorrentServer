@@ -1,85 +1,32 @@
 package database
 
-import (
-	"database/sql"
-	"sync"
-	"time"
-
-	_ "github.com/mattn/go-sqlite3"
-)
-
-type DBConn struct {
-	db *sql.DB
-	mu sync.Mutex
-}
+import "time"
 
 type TargetFile struct {
-	Path string
-	InfoHash string
-	Time string
+	Path        string
+	InfoHash    string
+	Time        string
 	Description string
-	TrackerURL string
+	TrackerURL  string
+	Complete	bool
+	Parts		string
 }
 
-func Connect() (*DBConn, error) {
-	const file string = "gotorrentserver.db"
-	db, err := sql.Open("sqlite3", file)
-	if err != nil {
-		return nil, err
-	}
-	const create string = `
-	CREATE TABLE IF NOT EXISTS torrents (
-		info_hash STRING NOT NULL PRIMARY KEY,
-		time DATETIME NOT NULL,
-		tracker_url STRING NOT NULL,
-		path STRING NOT NULL,
-		description TEXT
-	);`
-	if _, err := db.Exec(create); err != nil {
-		return nil, err
-	}
-	return &DBConn{
-		db: db,
-	}, nil
-}
-
-func (dbc *DBConn) AddFile(tf TargetFile) error {
+func (dbc *DBConn) AddTargetFile(tf TargetFile) error {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
 	const insert string = `
-	INSERT INTO torrents (info_hash, time, tracker_url, path, description)
-	VALUES (?, ?, ?, ?, ?)
+	INSERT INTO torrents (info_hash, time, tracker_url, path, description, complete, parts)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := dbc.db.Exec(insert, tf.InfoHash, time.Now(), tf.TrackerURL, tf.Path, tf.Description)
+	_, err := dbc.db.Exec(insert, tf.InfoHash, time.Now(), tf.TrackerURL, tf.Path, tf.Description, false, "")
 
 	return err
 }
 
-func (dbc *DBConn) AddFileStrings(infoHash string, trackerUrl string, path string, description string) error {
-	dbc.mu.Lock()
-	defer dbc.mu.Unlock()
-
-	tf := TargetFile{
-		InfoHash: infoHash,
-		Time: time.Now().String(),
-		TrackerURL: trackerUrl,
-		Path: path,
-		Description: description,
-	}
-
-	const insert string = `
-	INSERT INTO torrents (info_hash, time, tracker_url, path, description)
-	VALUES (?, ?, ?, ?, ?)
-	`
-
-	_, err := dbc.db.Exec(insert, tf.InfoHash, tf.Time, tf.TrackerURL, tf.Path)
-
-	return err
-}
-
-func (dbc *DBConn) GetFile(infoHash string) (*TargetFile, error) {
+func (dbc *DBConn) GetTargetFile(infoHash string) (*TargetFile, error) {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
@@ -89,7 +36,7 @@ func (dbc *DBConn) GetFile(infoHash string) (*TargetFile, error) {
 	WHERE info_hash = ?
 	`
 	var tf TargetFile
-	err := dbc.db.QueryRow(query, infoHash).Scan(&tf.InfoHash, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description)
+	err := dbc.db.QueryRow(query, infoHash).Scan(&tf.InfoHash, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description, &tf.Complete, &tf.Parts)
 
 	if err != nil {
 		return nil, err
@@ -98,7 +45,7 @@ func (dbc *DBConn) GetFile(infoHash string) (*TargetFile, error) {
 	return &tf, nil
 }
 
-func (dbc *DBConn) GetPath(infoHash string) (string, error) {
+func (dbc *DBConn) GetTargetFilePath(infoHash string) (string, error) {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
@@ -118,7 +65,26 @@ func (dbc *DBConn) GetPath(infoHash string) (string, error) {
 	return path, nil
 }
 
-func (dbc *DBConn) GetTrackerURL(infoHash string) (string, error) {
+func (dbc *DBConn) UpdateTargetFileTrackerURL(infoHash string, newTrackerUrl string) error {
+	dbc.mu.Lock()
+	defer dbc.mu.Unlock()
+
+	const update string = `
+	UPDATE torrents
+	SET tracker_url = ?
+	WHERE info_hash = ?
+	`
+
+	_, err := dbc.db.Exec(update, newTrackerUrl, infoHash)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dbc *DBConn) GetTargetFileTrackerURL(infoHash string) (string, error) {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
@@ -138,12 +104,50 @@ func (dbc *DBConn) GetTrackerURL(infoHash string) (string, error) {
 	return trackerUrl, nil
 }
 
-func (dbc *DBConn) GetAllFiles() ([]*TargetFile, error) {
+func (dbc *DBConn) GetTargetFileComplete(infoHash string) (bool, error) {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
 	const query string = `
-	SELECT info_hash, time, tracker_url, path, description
+	SELECT complete FROM torrents
+	where info_hash = ?
+	`
+
+	var complete bool
+	err := dbc.db.QueryRow(query, infoHash).Scan(&complete)
+
+	if err != nil {
+		return false, err
+	}
+
+	return complete, nil
+}
+
+func (dbc *DBConn) GetTargetFileParts(infoHash string) (string, error) {
+	dbc.mu.Lock()
+	defer dbc.mu.Unlock()
+
+	const query string = `
+	SELECT parts FROM torrents
+	where info_hash = ?
+	`
+
+	var parts string
+	err := dbc.db.QueryRow(query, infoHash).Scan(&parts)
+
+	if err != nil {
+		return "", err
+	}
+
+	return parts, nil
+}
+
+func (dbc *DBConn) GetAllTargetFiles() ([]*TargetFile, error) {
+	dbc.mu.Lock()
+	defer dbc.mu.Unlock()
+
+	const query string = `
+	SELECT *
 	FROM torrents
 	`
 	rows, err := dbc.db.Query(query)
@@ -151,11 +155,11 @@ func (dbc *DBConn) GetAllFiles() ([]*TargetFile, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var files []*TargetFile
 	for rows.Next() {
 		var tf TargetFile
-		if err := rows.Scan(&tf.InfoHash, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description); err != nil {
+		if err := rows.Scan(&tf.InfoHash, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description, &tf.Complete, &tf.Parts); err != nil {
 			return nil, err
 		}
 		files = append(files, &tf)
@@ -168,7 +172,46 @@ func (dbc *DBConn) GetAllFiles() ([]*TargetFile, error) {
 	return files, nil
 }
 
-func (dbc *DBConn) DeleteFile(infoHash string) error {
+func (dbc *DBConn) UpdateTargetFileParts(infoHash string, newParts string) error {
+	dbc.mu.Lock()
+	defer dbc.mu.Unlock()
+
+	const update string = `
+	UPDATE torrents
+	SET parts = ?
+	WHERE info_hash = ?
+	`
+
+	_, err := dbc.db.Exec(update, newParts, infoHash)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dbc *DBConn) UpdateTargetFileComplete(infoHash string, newComplete bool) error {
+	dbc.mu.Lock()
+	defer dbc.mu.Unlock()
+
+	const update string = `
+	UPDATE torrents
+	SET complete = ?
+	WHERE info_hash = ?
+	`
+
+	_, err := dbc.db.Exec(update, newComplete, infoHash)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+
+func (dbc *DBConn) DeleteTargetFile(infoHash string) error {
 	dbc.mu.Lock()
 	defer dbc.mu.Unlock()
 
@@ -180,11 +223,4 @@ func (dbc *DBConn) DeleteFile(infoHash string) error {
 	_, err := dbc.db.Exec(delete, infoHash)
 
 	return err
-}
-
-func (dbc *DBConn) Disconnect() error {
-	dbc.mu.Lock()
-	defer dbc.mu.Unlock()
-
-	return dbc.db.Close()
 }

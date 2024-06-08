@@ -1,6 +1,7 @@
-package torrentfile
+package bencode
 
 import (
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"strconv"
@@ -21,6 +22,7 @@ type Token struct {
 	Type TokenType
 	Value []byte
 }
+
 
 func Tokenize(data *[]byte) ([]Token, error) {
 	curContainers := []Token{}
@@ -71,6 +73,30 @@ func Tokenize(data *[]byte) ([]Token, error) {
 	return tokens, nil
 }
 
+func PrintToken(token Token) {
+	typeString := ""
+	switch token.Type {
+	case STRING:
+		typeString = "String"
+	case INTEGER:
+		typeString = "INTEGER"
+	case LIST:
+		typeString = "LIST"
+	case DICTIONARY:
+		typeString = "DICTIONARY"
+	case END_OF_DICTIONARY:
+		typeString = "END_OF_DICTIONARY"
+	case END_OF_LIST:
+		typeString = "END_OF_LIST"
+	}
+	valString := string(token.Value)
+	if token.Type == STRING || token.Type == INTEGER {
+		fmt.Printf("{%s: %s}", typeString, valString)
+	} else {
+		fmt.Printf("{%s}", typeString)
+	}
+}
+
 
 func PrintTokens(tokens []Token) {
 	for i := range tokens {
@@ -106,8 +132,8 @@ func ParseString(token Token) (string, error) {
 	return string(token.Value), nil
 }
 
-func ParseInteger(token Token) (uint64, error) {
-	retInt, err := strconv.ParseUint(string(token.Value), 10, 64)
+func ParseInteger(token Token) (int64, error) {
+	retInt, err := strconv.ParseInt(string(token.Value), 10, 64)
 	if err != nil {
 		return 0, err
 	}
@@ -247,3 +273,124 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 	return dict, nil
 }
 
+func Parse(data *[]byte) (map[string]interface{}, error) {
+	tokens, err := Tokenize(data)
+	if err != nil {
+		return nil, err
+	}
+	dict, err := ParseDict(tokens)
+	if err != nil {
+		return nil, err
+	}
+	return dict, nil
+}
+
+func bEncodeInt(val int64) string {
+	return fmt.Sprintf("i%de", val)
+}
+
+func bEncodeString(val string) string {
+	return fmt.Sprintf("%d:%s", len(val), val)
+}
+
+func bEncodeList(list []interface{}) (string, error) {
+	bString := "l"
+	for _, item := range list {
+		switch v := item.(type) {
+		case string:
+			bString += bEncodeString(v)
+		case int64:
+			bString += bEncodeInt(v)
+		case []interface{}:
+			listString, err := bEncodeList(v)
+			if err != nil {
+				return "", err
+			}
+			bString += listString
+		case map[string]interface{}:
+			dictString, err := BEncode(v)
+			if err != nil {
+				return "", err
+			}
+			bString += dictString
+		}
+	}
+	bString += "e"
+	return bString, nil
+}
+
+func BEncode(dict map[string]interface{}) (string, error) {
+	bString := "d"
+	for key, value := range dict {
+		bString += bEncodeString(key)
+		switch v := value.(type) {
+		case string:
+			bString += bEncodeString(v)
+		case int64:
+			bString += bEncodeInt(v)
+		case []interface{}:
+			listString, err := bEncodeList(v)
+			if err != nil {
+				return "", err
+			}
+			bString += listString
+		case map[string]interface{}:
+			dictString, err := BEncode(v)
+			if err != nil {
+				return "", err
+			}
+			bString += dictString
+		}
+	}
+	bString += "e"
+	return bString, nil
+}
+
+func GetInfoHash(data *[]byte) ([]byte, error) {
+	sData := (*data)
+	i := 0
+	searchStr := "4:infod"
+	curStr := string(sData[i:i+7])
+	for i < len(sData) - 7 && curStr != searchStr{
+		i++
+		curStr = string(sData[i:i+7])
+	}
+	dictStart := i + 6
+	contCount := 1
+	i += 7
+	for i < len(sData) && contCount > 0 {
+		if sData[i] >= '0' && sData[i] <= '9' {
+			j := i + 1
+			for sData[j] >= '0' && sData[j] <= '9' {
+				j++
+			}
+			if sData[j] == ':' {
+				strLength, err := strconv.ParseInt(string(sData[i:j]), 10, 32)
+				if err == nil {
+					i = j + int(strLength) + 1
+				}
+			}
+		}
+		switch sData[i] {
+		case 'i':
+			for sData[i] != 'e' {
+				i++
+			}
+			i++
+		case 'd':
+			contCount++
+			i++
+		case 'l':
+			contCount++
+			i++
+		case 'e':
+			contCount--
+			i++
+		}
+	}
+	sInfo := sData[dictStart: i]
+	hasher := sha1.New()
+	hasher.Write([]byte(sInfo))
+	infoHash := hasher.Sum(nil)
+	return infoHash, nil
+}

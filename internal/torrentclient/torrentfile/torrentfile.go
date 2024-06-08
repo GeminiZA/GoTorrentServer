@@ -3,27 +3,30 @@ package torrentfile
 import (
 	"errors"
 	"os"
+
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
 
 type FileInfo struct {
 	Path   []string
-	Length uint64
+	Length int64
 }
 
 type TorrentInfo struct {
 	Name        string
-	PieceLength uint64
+	PieceLength int64
 	Pieces      [][]byte
 	Private     bool
-	Length      uint64
+	Length      int64
 	Files       []FileInfo
 	MultiFile	bool
 }
 
 type TorrentFile struct {
+	InfoHash 	 []byte
 	Announce     string
 	AnnounceList [][]string
-	CreationDate uint64
+	CreationDate int64
 	Comment      string
 	CreatedBy    string
 	Encoding     string
@@ -36,18 +39,25 @@ func ParseFile(path string) (*TorrentFile, error) {
 		return nil, err
 	}
 
-	tokens, err := Tokenize(&data)
+	var tf TorrentFile
+
+	tf.InfoHash, err = bencode.GetInfoHash(&data)
+
+	if err != nil {
+		panic(err)
+	}
+
+	tokens, err := bencode.Tokenize(&data)
 
 	if err != nil {
 		return nil, err
 	}
 
-	dict, err := ParseDict(tokens)
+	dict, err := bencode.ParseDict(tokens)
 	if err != nil {
 		return nil, err
 	}
 	
-	var tf TorrentFile
 	var ok bool
 	tf.Announce, ok = dict["announce"].(string)
 	if !ok {
@@ -68,7 +78,7 @@ func ParseFile(path string) (*TorrentFile, error) {
 			}
 		}
 	}
-	tf.CreationDate, ok = dict["creation date"].(uint64)
+	tf.CreationDate, ok = dict["creation date"].(int64)
 	if !ok {
 		return nil, errors.New("no creation date")
 	}
@@ -86,7 +96,7 @@ func ParseFile(path string) (*TorrentFile, error) {
 	if !ok {
 		return nil, errors.New("no name")
 	}
-	tf.Info.PieceLength, ok = infoDict["piece length"].(uint64)
+	tf.Info.PieceLength, ok = infoDict["piece length"].(int64)
 	if !ok {
 		return nil, errors.New("no piece length")
 	}
@@ -101,12 +111,12 @@ func ParseFile(path string) (*TorrentFile, error) {
 	for i := 0; i < len(piecesString); i += 20 {
 		tf.Info.Pieces = append(tf.Info.Pieces, []byte(piecesString[i:i+20]))
 	}
-	privateBool, ok := infoDict["private"].(uint64)
+	privateBool, ok := infoDict["private"].(int64)
 	if !ok {
 		return nil, errors.New("no private")
 	}
 	tf.Info.Private = privateBool != 0
-	length, ok := infoDict["length"].(uint64)
+	length, ok := infoDict["length"].(int64)
 	if ok {
 		tf.Info.Length = length
 		tf.Info.MultiFile = false
@@ -121,7 +131,7 @@ func ParseFile(path string) (*TorrentFile, error) {
 			if !ok {
 				return nil, errors.New("invalid file item")
 			}
-			length, ok := fileItem["length"].(uint64)
+			length, ok := fileItem["length"].(int64)
 			if !ok {
 				return nil, errors.New("no length in file")
 			}

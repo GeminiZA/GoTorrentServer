@@ -1,7 +1,7 @@
 package contentfile
 
 type ContentFile struct {
-	NumParts       uint32
+	NumParts       int64
 	PartCompletion []bool
 	PartHashes     [][]byte
 	Sha1Hash       []byte

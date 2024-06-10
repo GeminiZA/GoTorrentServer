@@ -2,6 +2,7 @@ package torrentfile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
@@ -33,30 +34,66 @@ type TorrentFile struct {
 	Info         TorrentInfo
 }
 
-func ParseFile(path string) (*TorrentFile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+func (tf *TorrentFile) Bencode() (string, error) {
+	dict := make(map[string]interface{})
+	dict["announce"] = tf.Announce
+	if len(tf.AnnounceList) > 0 {
+		dict["announce list"] = tf.AnnounceList
 	}
+	dict["creation date"] = tf.CreationDate
+	dict["comment"] = tf.Comment
+	dict["created by"] = tf.CreatedBy
+	dict["encoding"] = tf.Encoding
+	infoDict := make(map[string]interface{})
+	dict["info"] = infoDict 
+	infoDict["name"] = tf.Info.Name
+	infoDict["piece length"] = tf.Info.PieceLength
+	piecesString := ""
+	for _, piece := range tf.Info.Pieces {
+		piecesString += string(piece)
+	}
+	infoDict["pieces"] = piecesString
+	infoDict["private"] = tf.Info.Private
+	infoDict["length"] = tf.Info.Length
+	if len(tf.Info.Files) > 0 {
+		filesList := make([]interface{}, 0)
+		for _, file := range tf.Info.Files {
+			filesList = append(filesList, make(map[string]interface{}))
+			if fileDict, ok := filesList[len(filesList)-1].(map[string]interface{}); ok {
+				fileDict["length"] = file.Length
+				fileDict["path"] = file.Path
+			}
+		}
+		infoDict["files"] = filesList
+	}
+	bencodedFile, err := bencode.BEncode(dict)
+	
+	return bencodedFile, err
+}
 
+func ParseFileString(data *[]byte) (*TorrentFile, error) {
 	var tf TorrentFile
+	var err error
 
-	tf.InfoHash, err = bencode.GetInfoHash(&data)
+	tf.InfoHash, err = bencode.GetInfoHash(data)
+	//fmt.Printf("Got info hash: %s\n", string(tf.InfoHash))
 
 	if err != nil {
 		panic(err)
 	}
 
-	tokens, err := bencode.Tokenize(&data)
+	tokens, err := bencode.Tokenize(data)
 
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("Succesfully tokenized file\n")
 
 	dict, err := bencode.ParseDict(tokens)
 	if err != nil {
 		return nil, err
 	}
+	//fmt.Printf("Successfully parsed dict\n")
 	
 	var ok bool
 	tf.Announce, ok = dict["announce"].(string)
@@ -150,6 +187,17 @@ func ParseFile(path string) (*TorrentFile, error) {
 			tf.Info.Files = append(tf.Info.Files, FileInfo{Path: pathList, Length: length})
 		}
 	}
-
 	return &tf, nil
+}
+
+func ParseFile(path string) (*TorrentFile, error) {
+	fmt.Printf("Parsing file with path: %s\n", path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	tf, err := ParseFileString(&data)
+
+	return tf, err
 }

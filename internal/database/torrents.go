@@ -3,6 +3,7 @@ package database
 import "time"
 
 type TargetFile struct {
+	Name		string
 	Path        string
 	InfoHash    string
 	Time        string
@@ -17,11 +18,11 @@ func (dbc *DBConn) AddTargetFile(tf TargetFile) error {
 	defer dbc.mu.Unlock()
 
 	const insert string = `
-	INSERT INTO torrents (info_hash, time, tracker_url, path, description, complete, parts)
+	INSERT INTO torrents (info_hash, name, time, tracker_url, path, description, complete, parts)
 	VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := dbc.db.Exec(insert, tf.InfoHash, time.Now(), tf.TrackerURL, tf.Path, tf.Description, false, "")
+	_, err := dbc.db.Exec(insert, tf.Name, tf.InfoHash, time.Now(), tf.TrackerURL, tf.Path, tf.Description, false, "")
 
 	return err
 }
@@ -31,12 +32,12 @@ func (dbc *DBConn) GetTargetFile(infoHash string) (*TargetFile, error) {
 	defer dbc.mu.Unlock()
 
 	const query string = `
-	SELECT info_hash, time, tracker_url, path, description
+	SELECT info_hash, name, time, tracker_url, path, description
 	FROM torrents
 	WHERE info_hash = ?
 	`
 	var tf TargetFile
-	err := dbc.db.QueryRow(query, infoHash).Scan(&tf.InfoHash, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description, &tf.Complete, &tf.Parts)
+	err := dbc.db.QueryRow(query, infoHash).Scan(&tf.InfoHash, &tf.Name, &tf.Time, &tf.TrackerURL, &tf.Path, &tf.Description, &tf.Complete, &tf.Parts)
 
 	if err != nil {
 		return nil, err

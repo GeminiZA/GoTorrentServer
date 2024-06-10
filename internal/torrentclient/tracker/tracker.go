@@ -50,6 +50,7 @@ func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploade
 
 func (tracker *Tracker) parseBody(body []byte) error {
 	bodyDict, err := bencode.Parse(&body)
+	fmt.Printf("Successfully parsed body\n")
 	if err != nil {
 		return err
 	}
@@ -81,9 +82,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 		if trackerIDStr, ok := trackerID.(string); ok {
 			tracker.TrackerID = trackerIDStr
 		}
-	} else {
-		return errors.New("no tracker id in response")
-	}
+	} 
 	if complete, ok := bodyDict["complete"]; ok {
 		if completeStr, ok := complete.(string); ok {
 			tracker.Seeders, err = strconv.ParseInt(completeStr, 10, 64)
@@ -91,8 +90,6 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				return err
 			}
 		}
-	} else {
-		return errors.New("no complete in response")
 	}
 	if incomplete, ok := bodyDict["incomplete"]; ok {
 		if incompleteStr, ok := incomplete.(string); ok {
@@ -101,11 +98,16 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				return err
 			}
 		}
-	} else {
-		return errors.New("no incomplete in response")
 	}
 	if peers, ok := bodyDict["peers"]; ok {
-		if peersList, ok := peers.([]map[string]interface{}); ok {
+		fmt.Printf("Found peers: %v\n", peers)
+		if peersListInter, ok := peers.([]interface{}); ok {
+			peersList := make([]map[string]interface{}, 0)
+			for _, inter := range peersListInter {
+				if mp, ok := inter.(map[string]interface{}); ok {
+					peersList = append(peersList, mp)
+				}
+			}
 			tracker.Peers = peersList
 		}
 	} else {
@@ -128,16 +130,21 @@ func (tracker *Tracker) Start() error {
 	params.Add("compact", "0")
 	params.Add("event", "started")
 
-	res, err := http.Get(fmt.Sprintf("%s:%s", tracker.TrackerUrl, params.Encode()))
+	res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
 
 	if err != nil {
 		return err
 	}
+
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
+	}
+
+	if body[0] != 'd' {
+		return fmt.Errorf("tracker response error: %s", string(body))
 	}
 
 	err = tracker.parseBody(body)
@@ -205,16 +212,6 @@ func (tracker *Tracker) Stop() error {
 		return err
 	}
 	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-
-	err = tracker.parseBody(body)
-	if err != nil {
-		return err
-	}
 
 	return nil
 }

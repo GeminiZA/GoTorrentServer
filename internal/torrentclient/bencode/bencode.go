@@ -25,6 +25,7 @@ type Token struct {
 
 
 func Tokenize(data *[]byte) ([]Token, error) {
+	//fmt.Printf("Tokenizing file\n")
 	curContainers := []Token{}
 	tokens := []Token{}
 	i := 0
@@ -347,6 +348,7 @@ func BEncode(dict map[string]interface{}) (string, error) {
 }
 
 func GetInfoHash(data *[]byte) ([]byte, error) {
+	//fmt.Println("Getting info hash...")
 	sData := (*data)
 	i := 0
 	searchStr := "4:infod"
@@ -368,6 +370,8 @@ func GetInfoHash(data *[]byte) ([]byte, error) {
 				strLength, err := strconv.ParseInt(string(sData[i:j]), 10, 32)
 				if err == nil {
 					i = j + int(strLength) + 1
+				} else {
+					return nil, err
 				}
 			}
 		}
@@ -388,6 +392,7 @@ func GetInfoHash(data *[]byte) ([]byte, error) {
 			i++
 		}
 	}
+	//fmt.Printf("info start: %d, info end: %d\n", dictStart, i)
 	sInfo := sData[dictStart: i]
 	hasher := sha1.New()
 	hasher.Write([]byte(sInfo))

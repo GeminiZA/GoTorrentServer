@@ -74,9 +74,15 @@ func New(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
 		bundle.Files = make([]*BundleFile, len(metaData.Info.Files))
 		curPieceIndex := int64(0)
 		for i, file := range metaData.Info.Files {
-			bundle.Files[i].Length = file.Length
+			bundle.Files[i] = &BundleFile{Length: file.Length}
 			bundle.Files[i].Path = path
 			for _, pathPiece := range file.Path {
+				if i != len(file.Path) - 1 {
+					err := os.MkdirAll(bundle.Files[i].Path, 0755)
+					if err != nil {
+						return nil, err
+					}
+				}
 				bundle.Files[i].Path += fmt.Sprintf("/%s", pathPiece)
 			}
 			numPieces := (file.Length + metaData.Info.PieceLength - 1) / metaData.Info.PieceLength
@@ -84,10 +90,39 @@ func New(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
 			bundle.Files[i].PieceEnd = curPieceIndex + numPieces
 		}
 	}
+	fmt.Println("Done creating dirs")
 	bundle.NumPieces = len(metaData.Info.Pieces)
 	bundle.Pieces = make([]*Piece, bundle.NumPieces)
 	for i := 0; i < len(metaData.Info.Pieces); i++ {
-		bundle.Pieces[i].hash = metaData.Info.Pieces[i]
+		bundle.Pieces[i] = &Piece{hash: metaData.Info.Pieces[i]}
+	}
+	for _, fileDetails := range bundle.Files {
+		fmt.Printf("Writing file: %s...\n", fileDetails.Path)
+		file, err := os.OpenFile(fileDetails.Path, os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, err
+		}
+		if fileDetails.Length > 1024 {
+			emptyKB := []byte{}
+			for j := 0; j < 1024; j++ {
+				emptyKB = append(emptyKB, 0)
+			}
+			numOfKB := fileDetails.Length / 1024
+			for i := int64(0); i < numOfKB; i++ {
+				fmt.Printf("Write kb %d / %d\n", i, numOfKB)
+				_, err := file.Write(emptyKB)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		left := fileDetails.Length - (fileDetails.Length / 1024)
+		for i := int64(0); i < left; i++ {
+			_, err := file.Write([]byte{0})
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return nil, nil
 }

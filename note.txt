@@ -1,0 +1,7 @@
+required bundle functionality:
+    get bit field
+    iscomplete
+    writeblock
+    getblock
+    getBlockOffset
+    getBlockLength

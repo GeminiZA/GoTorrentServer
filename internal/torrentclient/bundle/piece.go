@@ -9,24 +9,28 @@ type Block struct {
 }
 
 type Piece struct {
-	PieceIndex int64
 	Blocks     []Block
+	Complete   bool
+	hash 	   []byte
+	Length	   int64
+	Full	   bool
 }
 
-func NewPiece(index int64, pieceLength int64) (*Piece, error) {
-	piece := Piece{PieceIndex: index}
-	numFullBlocks := pieceLength / 16384
+func NewPiece(pieceLength int64, hash []byte) (*Piece, error) {
+	const MAX_BLOCK_SIZE int64 = 16384
+	piece := Piece{Full: false, Complete: false}
+	numFullBlocks := pieceLength / MAX_BLOCK_SIZE
 	for i := 0; i < int(numFullBlocks); i++ {
 		piece.Blocks = append(piece.Blocks, Block{
-												ByteOffset: 16384*int64(i),
+												ByteOffset: MAX_BLOCK_SIZE*int64(i),
 												Written: false,
-												Length: 16384,
+												Length: MAX_BLOCK_SIZE,
 											})
 	}
-	if numFullBlocks * 16384 < pieceLength {
-		lastBlockLength := pieceLength - (numFullBlocks * 16384)
+	if numFullBlocks * MAX_BLOCK_SIZE < pieceLength {
+		lastBlockLength := pieceLength - (numFullBlocks * MAX_BLOCK_SIZE)
 		piece.Blocks = append(piece.Blocks, Block{
-												ByteOffset: numFullBlocks * 16384,
+												ByteOffset: numFullBlocks * MAX_BLOCK_SIZE,
 												Written: false,
 												Length: lastBlockLength,
 											})
@@ -34,10 +38,41 @@ func NewPiece(index int64, pieceLength int64) (*Piece, error) {
 	return &piece, nil
 }
 
-func (piece *Piece) WritePiece(path string) error {
+func (piece *Piece) IsBlockWritten(byteOffset int64) (bool, error) {
 	for _, block := range piece.Blocks {
-		if !block.Written {
-			return errors.New("piece not complete")
+		if block.ByteOffset > byteOffset {
+			return false, errors.New("invalid block byte offset")
+		} else if block.ByteOffset == byteOffset {
+			return block.Written, nil
 		}
 	}
+	return false, nil
+}
+
+func (piece *Piece) SetBlockWritten(byteOffset int64) error {
+	for _, block := range piece.Blocks {
+		if block.ByteOffset > byteOffset {
+			return errors.New("invalid block byte offset")
+		} else if block.ByteOffset == byteOffset {
+			block.Written = true
+			return nil
+		}
+	}
+	return nil
+}
+
+func (piece *Piece) Reset() {
+	for _, block := range piece.Blocks {
+		block.Written = false
+	}
+	piece.Full = false
+}
+
+func (piece *Piece) CheckFull() {
+	for _, block := range piece.Blocks {
+		if !block.Written {
+			return
+		}
+	}
+	piece.Full = true
 }

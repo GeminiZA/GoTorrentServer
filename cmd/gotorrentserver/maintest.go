@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/downloadfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
@@ -12,10 +11,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println(tf.Info.Files)
 	fmt.Printf("Name: %s\nLength: %d\nPieceLength:%d\n", tf.Info.Name, tf.Info.Length, tf.Info.PieceLength)
-	df, err := downloadfile.New(tf.Info.Name + ".download", tf.Info.Length, tf.Info.PieceLength, tf)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(df.BitField)
 }

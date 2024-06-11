@@ -20,6 +20,7 @@ const (
 	PIECE
 	CANCEL
 	PORT //for DHT
+	HANDSHAKE
 )
 
 type Message struct {
@@ -30,6 +31,8 @@ type Message struct {
 	Begin uint32
 	Piece []byte
 	Port uint32
+	PeerID string
+	InfoHash string
 }
 
 func (m Message) GetBytes() ([]byte, error) {
@@ -106,8 +109,38 @@ func (m Message) GetBytes() ([]byte, error) {
 		ret := []byte{0,0,0,3,9}
 		ret = append(ret, portBytes...)
 		return ret, nil
+	case HANDSHAKE:
+		pstr := []byte("BitTorrent Protocol")
+		pstrlen := byte(len(pstr))
+		reserved := make([]byte, 8)
+		infoHash := []byte(m.InfoHash)
+		peerID := []byte(m.PeerID)
+		ret := pstr
+		ret = append(ret, pstrlen)
+		ret = append(ret, reserved...)
+		ret = append(ret, infoHash...)
+		ret = append(ret, peerID...)
+		return ret, nil
 	}
 	return nil, nil
+}
+
+func ParseHandshake(data []byte) (*Message, error) {
+	msg := Message{Type: HANDSHAKE}
+	i := 0
+	pstrlen := int(data[i])
+	i++
+	pstr := string(data[i:i+pstrlen])
+	if pstr != "BitTorrent Protocol" {
+		return nil, errors.New("invalid protocol string")
+	}
+	i = i + int(pstrlen)
+	//_ = data[i:i+8] // reserved bytes
+	i += 8
+	msg.InfoHash = string(data[i:i+20])
+	i += 20
+	msg.PeerID = string(data[i:i+20])
+	return &msg, nil
 }
 
 func ParseMessage(data []byte) (*Message, error) {
@@ -201,4 +234,55 @@ func (msg *Message) Print() {
 	case PORT:
 		fmt.Printf("{Type: port, port: %d}\n", msg.Port)
 	}
+}
+
+func NewHandshake(infoHash string, peerID string) *Message {
+	msg := Message{Type: HANDSHAKE}
+	msg.InfoHash = infoHash
+	msg.PeerID = peerID
+	return &msg
+}
+
+func NewKeepAlive() *Message {
+	return &Message{Type: KEEP_ALIVE}
+}
+
+func NewChoke() *Message {
+	return &Message{Type: CHOKE}
+}
+
+func NewUnchoke() *Message {
+	return &Message{Type: UNCHOKE}
+}
+
+func NewInterested() *Message {
+	return &Message{Type: INTERESTED}
+}
+
+func NewNotInterested() *Message {
+	return &Message{Type: NOT_INTERESTED}
+}
+
+func NewHave(index uint32) *Message {
+	return &Message{Type: HAVE, Index: index}
+}
+
+func NewBitfield(bitfield []byte) *Message {
+	return &Message{Type: BITFIELD, BitField: bitfield}
+}
+
+func NewRequest(index uint32, beginOffset uint32, length uint32) *Message {
+	return &Message{Type: REQUEST, Index: index, Begin: beginOffset, Length: length}
+}
+
+func NewPiece(index uint32, beginOffset uint32, block []byte) *Message {
+	return &Message{Type: PIECE, Index: index, Begin: beginOffset, Piece: block}
+}
+
+func NewCancel(index uint32, beginOffset uint32, length uint32) *Message {
+	return &Message{Type: CANCEL, Index: index, Begin: beginOffset, Length: length}
+}
+
+func NewPort(port uint32) *Message {
+	return &Message{Type: PORT, Port: port}
 }

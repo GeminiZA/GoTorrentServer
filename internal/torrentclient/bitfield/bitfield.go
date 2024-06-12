@@ -3,12 +3,10 @@ package bitfield
 import (
 	"errors"
 	"fmt"
-	"sync"
 )
 
 type BitField struct {
 	Bytes []byte
-	mux sync.Mutex
 }
 
 func LoadBytes(bytes []byte) *BitField {
@@ -34,16 +32,10 @@ func (bf *BitField) GetAll() []byte {
 }
 
 func (bf *BitField) Len() int {
-	bf.mux.Lock()
-	defer bf.mux.Unlock()
-
 	return len(bf.Bytes) * 8
 }
 
 func (bf *BitField) SetBit(index int64) error {
-	bf.mux.Lock()
-	defer bf.mux.Unlock()
-
 	if index > int64(len(bf.Bytes))/8 {
 		return errors.New("out of bounds")
 	}
@@ -54,18 +46,21 @@ func (bf *BitField) SetBit(index int64) error {
 }
 
 func (bf *BitField) GetBit(index int64) bool {
-	bf.mux.Lock()
-	defer bf.mux.Unlock()
-
 	byteIndex := index / 8
 	bitIndex := index % 8
 	return (1 & (bf.Bytes[byteIndex] >> (7 - bitIndex))) == 1
 }
 
-func (bf *BitField) Print() {
-	bf.mux.Lock()
-	defer bf.mux.Unlock()
+func (bf *BitField) Complete() bool {
+	for _, b := range bf.Bytes {
+		if !(b == 0xFF) {
+			return false
+		}
+	}
+	return true
+}
 
+func (bf *BitField) Print() {
 	for _, b := range bf.Bytes {
 		fmt.Printf("%08b", b)
 	}

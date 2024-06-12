@@ -1,3 +1,4 @@
+// Todo: load bundle from currently active torrent
 package bundle
 
 import (
@@ -14,7 +15,6 @@ type BundleFile struct {
 	Path string
 	Length int64
 	ByteStart int64
-	ByteEnd int64
 }
 
 type Bundle struct {
@@ -32,249 +32,151 @@ type Bundle struct {
 	mux sync.Mutex
 }
 
-func (bundle *Bundle) CheckComplete() error {
-	bundle.mux.Lock()
-	defer bundle.mux.Unlock()
-
-	for _, piece := range bundle.Pieces {
-		if !piece.Complete {
-			return nil
-		}
-	}
-	bundle.Complete = true
-	return nil
-}
-
-func Create(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
-	bundle := Bundle{Path: path, Name: metaData.Info.Name, Complete: false, PieceLength: metaData.Info.PieceLength}
-	if metaData.Info.Length != 0 {
-		bundle.MultiFile = false
-		bundle.Length = metaData.Info.Length
-		bundle.File = &BundleFile{Path: fmt.Sprintf("%s/%s", path, metaData.Info.Name), Length: metaData.Info.Length}
-	} else {
+func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, error) {
+	bundle := Bundle{Name: metaData.Info.Name, PieceLength: metaData.Info.PieceLength, Complete: false, Path: bundlePath}
+	totalLength := int64(0)
+	//Files
+	if metaData.Info.Length == 0 {
 		bundle.MultiFile = true
-		bundle.Files = make([]*BundleFile, len(metaData.Info.Files))
-		for i, file := range metaData.Info.Files {
-			bundle.Files[i] = &BundleFile{Length: file.Length}
-			bundle.Files[i].Path = path
+		curByte := int64(0)
+		for _, file := range metaData.Info.Files {
+			curBundleFile := BundleFile{ByteStart: curByte, Length: file.Length, Path: fmt.Sprintf("./%s/%s", bundle.Path, metaData.Info.Name)}
+			curByte += file.Length
+			totalLength += file.Length
 			for _, pathPiece := range file.Path {
-				if i != len(file.Path) - 1 {
-					err := os.MkdirAll(bundle.Files[i].Path, 0755)
-					if err != nil {
-						return nil, err
-					}
-				}
-				bundle.Files[i].Path += fmt.Sprintf("/%s", pathPiece)
+				curBundleFile.Path += pathPiece
 			}
+			bundle.Files = append(bundle.Files, &curBundleFile)
 		}
+	} else { //Single File mode
+		bundle.MultiFile = false
+		bundle.File = &BundleFile{ByteStart: 0, Length: metaData.Info.Length, Path: fmt.Sprintf("./%s/%s", bundle.Path, metaData.Info.Name)}
+		totalLength = metaData.Info.Length
 	}
-	fmt.Println("Done creating dirs")
-	bundle.NumPieces = len(metaData.Info.Pieces)
-	fmt.Printf("Num pieces: %d\n", bundle.NumPieces)
+	if metaData.Info.PieceLength == 0 {
+		return nil, errors.New("no piece length")
+	}
+	//Pieces
+	if len(metaData.Info.Pieces) == 0 {
+		return nil, errors.New("no pieces")
+	}
+	curByte := int64(0)
+	bundle.PieceLength = metaData.Info.PieceLength
+	for _, pieceHash := range metaData.Info.Pieces {
+		curPieceLength := bundle.PieceLength
+		if curByte + bundle.PieceLength > totalLength {
+			curPieceLength = totalLength - curByte
+		}
+		curPiece := NewPiece(curPieceLength, curByte, pieceHash)
+		bundle.Pieces = append(bundle.Pieces, curPiece)
+	}
+	bundle.NumPieces = len(bundle.Pieces)
+
+	//bitfield
+
 	bundle.BitField = bitfield.New(bundle.NumPieces)
-	bundle.Pieces = make([]*Piece, bundle.NumPieces)
-	var err error
-	pieceIndex := 0
-	for _, fileDetails := range bundle.Files {
-		curLen := int64(0)
-		for curLen < fileDetails.Length {
-			pieceLength := bundle.PieceLength
-			if fileDetails.Length - bundle.PieceLength - int64(curLen) < 0 {
-				pieceLength = fileDetails.Length - curLen
-			}
-			bundle.Pieces[pieceIndex], err = NewPiece(int64(pieceLength), metaData.Info.Pieces[pieceIndex])
-			if err != nil {
-				return nil, err
-			}
-			fmt.Printf("Added piece: %d / %d\n", pieceIndex, bundle.NumPieces)
-			curLen += pieceLength
-			pieceIndex++
-		}
-		fmt.Printf("Writing file: %s...\n", fileDetails.Path)
-		if !checkFile(fileDetails.Path, fileDetails.Length) {
-			file, err := os.OpenFile(fileDetails.Path, os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return nil, err
-			}
-			for i := int64(0); i < fileDetails.Length; i++ {
-				_, err := file.Write([]byte{0})
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
+	
 	return &bundle, nil
 }
 
-func checkFile(path string, length int64) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if info.Size() != length {
-		return false
-	}
-	return true
-}
-
-func (bundle *Bundle) Delete() error {
+func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []byte) error { //beginOffset will always match a block in pieces
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
-
-	var err error
-	if bundle.MultiFile {
-		for _, file := range bundle.Files {
-			err = os.Remove(file.Path)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		err = os.Remove(bundle.Path)
+	
+	err := bundle.Pieces[pieceIndex].WriteBlock(beginOffset, block)
+	if err != nil {
+		return err
+	}
+	if bundle.Pieces[pieceIndex].Complete() {
+		bundle.BitField.SetBit(pieceIndex)
+		err := bundle.WritePiece(pieceIndex)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	if bundle.BitField.Complete() {
+		bundle.Complete = true
+	}
+	return err
 }
 
-func (bundle *Bundle) getFile(byteOffset int64) (*BundleFile, error) {
-	for _, file := range bundle.Files {
-		if file.ByteStart >= byteOffset && file.ByteEnd <= byteOffset {
-			return file, nil
+func (bundle *Bundle) WritePiece(pieceIndex int64) error {
+	curPiece := bundle.Pieces[pieceIndex]
+	bytes := curPiece.GetBytes()
+	curByte := int64(0)
+	fileStartByteOffset := int64(0)
+	for _, bundleFile := range bundle.Files {
+		curByteOffset := curPiece.ByteOffset + curByte
+		if bundleFile.ByteStart <= curByteOffset && curByteOffset <= bundleFile.ByteStart + bundleFile.Length {
+			numBytesToWrite := len(bytes) - int(curByte)
+			
 		}
+		fileStartByteOffset += bundleFile.Length
 	}
-	return nil, errors.New("byte not in files length")
-}
-
-func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []byte) error {
-	bundle.mux.Lock()
-	defer bundle.mux.Unlock()
-
-	byteOffset := int64(0)
-	for i := int64(0); i < pieceIndex; i++ {
-		byteOffset += bundle.Pieces[i].Length
-	}
-	byteOffset += beginOffset
-
-	blockOffset := 0
-	for _, file := range bundle.Files {
-		if byteOffset < file.Length {
-			f, err := os.OpenFile(file.Path, os.O_WRONLY, 0644)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			_, err = f.Seek(byteOffset, 0)
-			if err != nil {
-				return err
-			}
-
-			writeLen := len(block) - blockOffset
-			if writeLen > int(file.Length - byteOffset) {
-				writeLen = int(file.Length - byteOffset)
-			}
-
-			_, err = f.Write(block[blockOffset : blockOffset + writeLen])
-			if err != nil {
-				return err
-			}
-
-			blockOffset += writeLen
-			byteOffset = 0
-
-			if blockOffset == len(block) {
-				break
-			}
-		} else {
-			byteOffset -= file.Length
-		}
-	}
-
-	//Update piece bitfield
-
-	bundle.Pieces[pieceIndex].SetBlockWritten(byteOffset)
-
-	bundle.Pieces[pieceIndex].CheckFull()
-	if bundle.Pieces[pieceIndex].Full {
-		hashCorrect, err := bundle.CheckPieceHash(pieceIndex)
-		if err != nil {
-			return nil
-		}
-		if hashCorrect {
-			bundle.Pieces[pieceIndex].Complete = true
-		} else {
-			bundle.Pieces[pieceIndex].Reset()
-		}
-	}
-
-	return nil
 }
 
 func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
-
-	block, err := bundle.readBlock(pieceIndex, beginOffset, length)
-	if err != nil {
-		return nil, err
-	}
-	return block, nil
-}
-
-func (bundle *Bundle) readBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
-
+	
+	//Read block from file directly
 	block := []byte{}
-
-	byteOffset := int64(0)
-	for i := int64(0); i < pieceIndex; i++ {
-		byteOffset += bundle.Pieces[i].Length
-	}
-	byteOffset += beginOffset
-
-	blockOffset := int64(0)
-	for _, file := range bundle.Files {
-		if byteOffset < file.Length {
-			f, err := os.OpenFile(file.Path, os.O_RDONLY, 0644)
+	bytesLeft := length
+	byteOffset := bundle.Pieces[pieceIndex].ByteOffset + beginOffset
+	for _, bundleFile := range bundle.Files {
+		if bundleFile.ByteStart <= byteOffset && bundleFile.ByteStart + bundleFile.Length <= byteOffset {
+			fileByteOffset := byteOffset - bundleFile.ByteStart			
+			readLen := bytesLeft
+			if fileByteOffset + bytesLeft > bundleFile.Length {
+				readLen = bytesLeft - (bundleFile.Length - fileByteOffset)
+			}
+			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0644)
 			if err != nil {
 				return nil, err
 			}
-			defer f.Close()
-
-			readLen := length - blockOffset
-			if readLen > file.Length - byteOffset {
-				readLen = file.Length - byteOffset
-			}
-
-			//Read
+			defer file.Close()
 			buf := make([]byte, readLen)
-
-			f.ReadAt(buf, byteOffset)
+			_, err = file.ReadAt(buf, fileByteOffset)
 			if err != nil {
 				return nil, err
 			}
-
-			block = append(block, buf...)
-
-			blockOffset += readLen
-			byteOffset = 0
-
-			if blockOffset == length {
+			bytesLeft -= readLen
+			byteOffset += readLen
+			if bytesLeft == 0 {
 				break
 			}
-		} else {
-			byteOffset -= file.Length
 		}
 	}
 	return block, nil
 }
 
-func (bundle *Bundle) CheckPieceHash(pieceIndex int64) (bool, error) {
+func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns pieceIndex, beginOffset, blockLength
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
-
-
-	return true, nil
+	
+	nextByte := int64(0)
+	pieceIndex := int64(0)
+	for i, b := range bundle.BitField.Bytes {
+		if b != 0xFF {
+			nextByte = int64(i)
+			break
+		}
+	}
+	for i := 0; i < 8; i++ {
+		if !bundle.BitField.GetBit(int64(nextByte) + int64(i)) {
+			pieceIndex = nextByte + int64(i)
+			break
+		}
+	}
+	beginOffset := int64(0)
+	curByte := int64(0)
+	for _, block := range bundle.Pieces[pieceIndex].blocks {
+		if !block.written {
+			beginOffset = curByte
+			break
+		}
+		curByte += block.length
+	}
+	length := curByte - beginOffset
+	return pieceIndex, beginOffset, length, nil
 }

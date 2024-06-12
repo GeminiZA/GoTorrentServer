@@ -1,83 +1,119 @@
+// Interface for only writing and storing pieces and blocks
 package bundle
 
 import (
+	"bytes"
+	"crypto/sha1"
 	"errors"
 )
 
 type Block struct {
-	ByteOffset int64
-	Length int64
-	Written    bool
+	length     int64
+	written    bool
+	bytes 	   []byte
 }
 
 type Piece struct {
-	Blocks     []Block
-	Complete   bool
+	blocks     []*Block
+	complete   bool
 	hash 	   []byte
-	Length	   int64
-	Full	   bool
+	length	   int64
+	ByteOffset int64
 }
 
-func NewPiece(pieceLength int64, hash []byte) (*Piece, error) {
-	const MAX_BLOCK_SIZE int64 = 16384
-	piece := Piece{Full: false, Complete: false}
-	numFullBlocks := pieceLength / MAX_BLOCK_SIZE
-	curOffset := int64(0)
-	piece.Blocks = make([]Block, (pieceLength + MAX_BLOCK_SIZE - 1) / MAX_BLOCK_SIZE)
-	for i := int64(0); i < numFullBlocks; i++ {
-		piece.Blocks[i] = Block{
-								ByteOffset: curOffset,
-								Written: false,
-								Length: MAX_BLOCK_SIZE,
-							}
-		curOffset += MAX_BLOCK_SIZE
-	}
-	if curOffset < pieceLength {
-		lastBlockLength := pieceLength - curOffset
-		piece.Blocks[len(piece.Blocks)-1] =  Block{
-			ByteOffset: curOffset,
-			Written: false,
-			Length: lastBlockLength,
+func newBlock(length int64) *Block {
+	return &Block{length: length, written: false}
+}
+
+func (block *Block) write(bytes []byte) {
+	block.bytes = bytes
+	block.written = true
+}
+
+func NewPiece(length int64, pieceByteOffset int64, hash []byte) *Piece {
+	const MAX_BLOCK_LENGTH int64 = 16384
+	piece := Piece{length: length, hash: hash, ByteOffset: pieceByteOffset, complete: false}
+	curByte := int64(0)
+	for curByte < length {
+		curBlockLength := MAX_BLOCK_LENGTH
+		if curByte + MAX_BLOCK_LENGTH > length {
+			curBlockLength = length - curByte
 		}
+		piece.blocks = append(piece.blocks, newBlock(curBlockLength))
 	}
-	return &piece, nil
+	return &piece
 }
 
-func (piece *Piece) IsBlockWritten(byteOffset int64) (bool, error) {
-	for _, block := range piece.Blocks {
-		if block.ByteOffset > byteOffset {
-			return false, errors.New("invalid block byte offset")
-		} else if block.ByteOffset == byteOffset {
-			return block.Written, nil
+func (piece *Piece) Reset() {
+	for _, block := range piece.blocks {
+		block.written = false
+		block.bytes = nil
+	}
+}
+
+func (piece *Piece) Complete() bool {
+	return piece.complete
+}
+
+func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
+	curByte := int64(0)
+	blockIndex := 0
+	for i, block := range piece.blocks {
+		if curByte == beginOffset {
+			blockIndex = i
+			break
 		}
+		curByte += block.length
 	}
-	return false, nil
-}
-
-func (piece *Piece) SetBlockWritten(byteOffset int64) error {
-	for _, block := range piece.Blocks {
-		if block.ByteOffset > byteOffset {
-			return errors.New("invalid block byte offset")
-		} else if block.ByteOffset == byteOffset {
-			block.Written = true
-			return nil
+	if curByte == piece.length {
+		return errors.New("could not find block")
+	}
+	if piece.blocks[blockIndex].written {
+		return errors.New("block already written")
+	}
+	if piece.blocks[blockIndex].length != int64(len(bytes)) {
+		return errors.New("block length incorrect")
+	}
+	piece.blocks[blockIndex].write(bytes)
+	if piece.checkFull() {
+		correct, err := piece.checkHash()
+		if err != nil {
+			return err
+		}
+		if !correct {
+			piece.Reset()
+		} else {
+			piece.complete = true
 		}
 	}
 	return nil
 }
 
-func (piece *Piece) Reset() {
-	for _, block := range piece.Blocks {
-		block.Written = false
-	}
-	piece.Full = false
-}
-
-func (piece *Piece) CheckFull() {
-	for _, block := range piece.Blocks {
-		if !block.Written {
-			return
+func (piece *Piece) checkHash() (bool, error) {
+	hasher := sha1.New()
+	for _, block := range piece.blocks {
+		_, err := hasher.Write(block.bytes)
+		if err != nil {
+			return false, err
 		}
 	}
-	piece.Full = true
+	pieceHash := hasher.Sum(nil)
+	return bytes.Equal(pieceHash, piece.hash), nil
+}
+
+func (piece *Piece) checkFull() bool {
+	for _, block := range piece.blocks {
+		if !block.written {
+			return false
+		}
+	}
+	return true
+}
+
+func (piece *Piece) GetBytes() []byte {
+	pieceBytes := []byte{}
+	for _, block := range piece.blocks {
+		pieceBytes = append(pieceBytes, block.bytes...)
+	}
+	return pieceBytes
 }

@@ -14,8 +14,9 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("Name: %s\nLength: %d\nPieceLength:%d\n", tf.Info.Name, tf.Info.Length, tf.Info.PieceLength)
+	fmt.Printf("Piece hash length: %d\n", len(tf.Info.Pieces[0]))
 	fmt.Println("Creating Bundle...")
-	bundle, err := bundle.New(fmt.Sprintf("./%s", tf.Info.Name), tf)
+	bundle, err := bundle.Create(fmt.Sprintf("./%s", tf.Info.Name), tf)
 	if err != nil {
 		panic(err)
 	}
@@ -23,6 +24,16 @@ func main() {
 	for _, file := range bundle.Files {
 		fmt.Printf("File: %s\n", file.Path)
 	}
-	fmt.Printf("Bitfield: %v\n")
-	
+	fmt.Printf("Pieces: %v\n", bundle.Pieces)
+	//for i, piece := range bundle.Pieces {
+		//fmt.Printf("Piece number: %d / %d\n", i, len(bundle.Pieces))
+		//for _, block := range piece.Blocks {
+			//fmt.Printf("Block: offset: %d, length: %d\n", block.ByteOffset, block.Length)
+		//}
+	//}
+	bundle.BitField.Print()
+	err = bundle.WriteBlock(0, 0, []byte{0xFF, 0xFF})
+	if err != nil {
+		panic(err)
+	}
 }

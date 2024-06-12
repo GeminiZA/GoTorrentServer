@@ -1,19 +1,20 @@
 package bundle
 
 import (
-	"crypto/sha1"
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
 type BundleFile struct {
 	Path string
 	Length int64
-	PieceStart int64
-	PieceEnd int64
+	ByteStart int64
+	ByteEnd int64
 }
 
 type Bundle struct {
@@ -26,34 +27,15 @@ type Bundle struct {
 	Files []*BundleFile
 	MultiFile bool
 	File *BundleFile
-	BitField []byte
+	BitField *bitfield.BitField
 	Complete bool
-}
-
-func (bundle *Bundle) GetBit(pieceIndex int64) (bool, error) {
-	if pieceIndex > int64(len(bundle.BitField)) {
-		return false, errors.New("out of range")
-	}
-	byteOffset := pieceIndex / 8
-	bitOffset := pieceIndex % 8
-	pieceByte := bundle.BitField[byteOffset]
-	ret := (pieceByte >> uint(7-bitOffset)) & 1	
-	return ret == 1, nil
-}
-
-func (bundle *Bundle) SetBit(pieceIndex int64) error {
-	if pieceIndex > int64(len(bundle.BitField)) {
-		return errors.New("out of range")
-	}
-	byteOffset := pieceIndex / 8
-	bitOffset := pieceIndex % 8
-	pieceByte := bundle.BitField[byteOffset]
-	pieceByte = pieceByte | (1 << uint(7 - bitOffset))
-	bundle.BitField[byteOffset] = pieceByte
-	return nil
+	mux sync.Mutex
 }
 
 func (bundle *Bundle) CheckComplete() error {
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
+
 	for _, piece := range bundle.Pieces {
 		if !piece.Complete {
 			return nil
@@ -63,16 +45,15 @@ func (bundle *Bundle) CheckComplete() error {
 	return nil
 }
 
-func New(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
-	bundle := Bundle{Path: path, Name: metaData.Info.Name, Complete: false}
+func Create(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
+	bundle := Bundle{Path: path, Name: metaData.Info.Name, Complete: false, PieceLength: metaData.Info.PieceLength}
 	if metaData.Info.Length != 0 {
 		bundle.MultiFile = false
 		bundle.Length = metaData.Info.Length
-		bundle.File = &BundleFile{Path: fmt.Sprintf("%s/%s", path, metaData.Info.Name), Length: metaData.Info.Length, PieceStart: 0, PieceEnd: int64(len(metaData.Info.Pieces))}
+		bundle.File = &BundleFile{Path: fmt.Sprintf("%s/%s", path, metaData.Info.Name), Length: metaData.Info.Length}
 	} else {
 		bundle.MultiFile = true
 		bundle.Files = make([]*BundleFile, len(metaData.Info.Files))
-		curPieceIndex := int64(0)
 		for i, file := range metaData.Info.Files {
 			bundle.Files[i] = &BundleFile{Length: file.Length}
 			bundle.Files[i].Path = path
@@ -85,49 +66,62 @@ func New(path string, metaData *torrentfile.TorrentFile) (*Bundle, error) {
 				}
 				bundle.Files[i].Path += fmt.Sprintf("/%s", pathPiece)
 			}
-			numPieces := (file.Length + metaData.Info.PieceLength - 1) / metaData.Info.PieceLength
-			bundle.Files[i].PieceStart = curPieceIndex
-			bundle.Files[i].PieceEnd = curPieceIndex + numPieces
 		}
 	}
 	fmt.Println("Done creating dirs")
 	bundle.NumPieces = len(metaData.Info.Pieces)
+	fmt.Printf("Num pieces: %d\n", bundle.NumPieces)
+	bundle.BitField = bitfield.New(bundle.NumPieces)
 	bundle.Pieces = make([]*Piece, bundle.NumPieces)
-	for i := 0; i < len(metaData.Info.Pieces); i++ {
-		bundle.Pieces[i] = &Piece{hash: metaData.Info.Pieces[i]}
-	}
+	var err error
+	pieceIndex := 0
 	for _, fileDetails := range bundle.Files {
-		fmt.Printf("Writing file: %s...\n", fileDetails.Path)
-		file, err := os.OpenFile(fileDetails.Path, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return nil, err
-		}
-		if fileDetails.Length > 1024 {
-			emptyKB := []byte{}
-			for j := 0; j < 1024; j++ {
-				emptyKB = append(emptyKB, 0)
+		curLen := int64(0)
+		for curLen < fileDetails.Length {
+			pieceLength := bundle.PieceLength
+			if fileDetails.Length - bundle.PieceLength - int64(curLen) < 0 {
+				pieceLength = fileDetails.Length - curLen
 			}
-			numOfKB := fileDetails.Length / 1024
-			for i := int64(0); i < numOfKB; i++ {
-				fmt.Printf("Write kb %d / %d\n", i, numOfKB)
-				_, err := file.Write(emptyKB)
+			bundle.Pieces[pieceIndex], err = NewPiece(int64(pieceLength), metaData.Info.Pieces[pieceIndex])
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("Added piece: %d / %d\n", pieceIndex, bundle.NumPieces)
+			curLen += pieceLength
+			pieceIndex++
+		}
+		fmt.Printf("Writing file: %s...\n", fileDetails.Path)
+		if !checkFile(fileDetails.Path, fileDetails.Length) {
+			file, err := os.OpenFile(fileDetails.Path, os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return nil, err
+			}
+			for i := int64(0); i < fileDetails.Length; i++ {
+				_, err := file.Write([]byte{0})
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
-		left := fileDetails.Length - (fileDetails.Length / 1024)
-		for i := int64(0); i < left; i++ {
-			_, err := file.Write([]byte{0})
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
-	return nil, nil
+	return &bundle, nil
+}
+
+func checkFile(path string, length int64) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if info.Size() != length {
+		return false
+	}
+	return true
 }
 
 func (bundle *Bundle) Delete() error {
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
+
 	var err error
 	if bundle.MultiFile {
 		for _, file := range bundle.Files {
@@ -145,52 +139,67 @@ func (bundle *Bundle) Delete() error {
 	return nil
 }
 
-func (bundle *Bundle) GetFile(pieceIndex int64) (*BundleFile, error) {
-	if bundle.MultiFile {
-		for _, file := range bundle.Files {
-			if file.PieceStart < pieceIndex && file.PieceEnd <= pieceIndex {
-				return file, nil
-			}
+func (bundle *Bundle) getFile(byteOffset int64) (*BundleFile, error) {
+	for _, file := range bundle.Files {
+		if file.ByteStart >= byteOffset && file.ByteEnd <= byteOffset {
+			return file, nil
 		}
-	} else {
-		return bundle.File, nil
 	}
-	return nil, errors.New("file not found")
+	return nil, errors.New("byte not in files length")
 }
 
 func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []byte) error {
-	curFile, err := bundle.GetFile(pieceIndex)
-	if err != nil {
-		return errors.New("trying to write block to out of bounds piece")
-	}
-	file, err := os.OpenFile(curFile.Path, os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
 
 	byteOffset := int64(0)
-	for i := curFile.PieceStart; i < pieceIndex; i++ {
+	for i := int64(0); i < pieceIndex; i++ {
 		byteOffset += bundle.Pieces[i].Length
 	}
 	byteOffset += beginOffset
 
-	_, err = file.Seek(byteOffset, 0)
-	if err != nil {
-		return err
+	blockOffset := 0
+	for _, file := range bundle.Files {
+		if byteOffset < file.Length {
+			f, err := os.OpenFile(file.Path, os.O_WRONLY, 0644)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			_, err = f.Seek(byteOffset, 0)
+			if err != nil {
+				return err
+			}
+
+			writeLen := len(block) - blockOffset
+			if writeLen > int(file.Length - byteOffset) {
+				writeLen = int(file.Length - byteOffset)
+			}
+
+			_, err = f.Write(block[blockOffset : blockOffset + writeLen])
+			if err != nil {
+				return err
+			}
+
+			blockOffset += writeLen
+			byteOffset = 0
+
+			if blockOffset == len(block) {
+				break
+			}
+		} else {
+			byteOffset -= file.Length
+		}
 	}
 
-	_, err = file.Write(block)
-	if err != nil {
-		return err
-	}
 	//Update piece bitfield
 
 	bundle.Pieces[pieceIndex].SetBlockWritten(byteOffset)
 
 	bundle.Pieces[pieceIndex].CheckFull()
 	if bundle.Pieces[pieceIndex].Full {
-		hashCorrect, err := bundle.CheckHash(pieceIndex)
+		hashCorrect, err := bundle.CheckPieceHash(pieceIndex)
 		if err != nil {
 			return nil
 		}
@@ -205,75 +214,67 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 }
 
 func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
-	curFile, err := bundle.GetFile(pieceIndex)
-	if err != nil {
-		return nil, errors.New("trying to read block to out of bounds piece")
-	}
-	file, err := os.OpenFile(curFile.Path, os.O_RDONLY, 0644)
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
+
+	block, err := bundle.readBlock(pieceIndex, beginOffset, length)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	return block, nil
+}
+
+func (bundle *Bundle) readBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
+
+	block := []byte{}
 
 	byteOffset := int64(0)
-	for i := curFile.PieceStart; i < pieceIndex; i++ {
+	for i := int64(0); i < pieceIndex; i++ {
 		byteOffset += bundle.Pieces[i].Length
 	}
 	byteOffset += beginOffset
 
-	blockIsWritten, err := bundle.Pieces[pieceIndex].IsBlockWritten(byteOffset)
-	if err != nil {
-		return nil, err
-	}
-	if !blockIsWritten {
-		return nil, errors.New("getting block that isnt written")
-	}
+	blockOffset := int64(0)
+	for _, file := range bundle.Files {
+		if byteOffset < file.Length {
+			f, err := os.OpenFile(file.Path, os.O_RDONLY, 0644)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
 
-	block := make([]byte, length)
-	_, err = file.ReadAt(block, byteOffset)
-	if err != nil {
-		return nil, err
-	}
+			readLen := length - blockOffset
+			if readLen > file.Length - byteOffset {
+				readLen = file.Length - byteOffset
+			}
 
+			//Read
+			buf := make([]byte, readLen)
+
+			f.ReadAt(buf, byteOffset)
+			if err != nil {
+				return nil, err
+			}
+
+			block = append(block, buf...)
+
+			blockOffset += readLen
+			byteOffset = 0
+
+			if blockOffset == length {
+				break
+			}
+		} else {
+			byteOffset -= file.Length
+		}
+	}
 	return block, nil
 }
 
-func (bundle *Bundle) CheckHash(pieceIndex int64) (bool, error) {
-	curFile, err := bundle.GetFile(pieceIndex)
-	if err != nil {
-		return false, errors.New("trying to read block to out of bounds piece")
-	}
-	file, err := os.OpenFile(curFile.Path, os.O_RDONLY, 0644)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-	
-	byteOffset := int64(0)
-	for i := curFile.PieceStart; i < pieceIndex; i++ {
-		byteOffset += bundle.Pieces[i].Length
-	}
+func (bundle *Bundle) CheckPieceHash(pieceIndex int64) (bool, error) {
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
 
-	pieceBytes := make([]byte, bundle.Pieces[pieceIndex].Length)
-
-	_, err = file.ReadAt(pieceBytes, byteOffset)
-	if err != nil {
-		return false, err
-	}
-
-	hasher := sha1.New()
-	_, err = hasher.Write(pieceBytes)
-	if err != nil {
-		return false, err
-	}
-
-	pieceHash := hasher.Sum(nil)
-
-	for i, curByte := range bundle.Pieces[pieceIndex].hash {
-		if pieceHash[i] != curByte {
-			return false, nil
-		}
-	}
 
 	return true, nil
 }

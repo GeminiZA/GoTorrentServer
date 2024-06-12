@@ -1,6 +1,8 @@
 package bundle
 
-import "errors"
+import (
+	"errors"
+)
 
 type Block struct {
 	ByteOffset int64
@@ -20,20 +22,23 @@ func NewPiece(pieceLength int64, hash []byte) (*Piece, error) {
 	const MAX_BLOCK_SIZE int64 = 16384
 	piece := Piece{Full: false, Complete: false}
 	numFullBlocks := pieceLength / MAX_BLOCK_SIZE
-	for i := 0; i < int(numFullBlocks); i++ {
-		piece.Blocks = append(piece.Blocks, Block{
-												ByteOffset: MAX_BLOCK_SIZE*int64(i),
-												Written: false,
-												Length: MAX_BLOCK_SIZE,
-											})
+	curOffset := int64(0)
+	piece.Blocks = make([]Block, (pieceLength + MAX_BLOCK_SIZE - 1) / MAX_BLOCK_SIZE)
+	for i := int64(0); i < numFullBlocks; i++ {
+		piece.Blocks[i] = Block{
+								ByteOffset: curOffset,
+								Written: false,
+								Length: MAX_BLOCK_SIZE,
+							}
+		curOffset += MAX_BLOCK_SIZE
 	}
-	if numFullBlocks * MAX_BLOCK_SIZE < pieceLength {
-		lastBlockLength := pieceLength - (numFullBlocks * MAX_BLOCK_SIZE)
-		piece.Blocks = append(piece.Blocks, Block{
-												ByteOffset: numFullBlocks * MAX_BLOCK_SIZE,
-												Written: false,
-												Length: lastBlockLength,
-											})
+	if curOffset < pieceLength {
+		lastBlockLength := pieceLength - curOffset
+		piece.Blocks[len(piece.Blocks)-1] =  Block{
+			ByteOffset: curOffset,
+			Written: false,
+			Length: lastBlockLength,
+		}
 	}
 	return &piece, nil
 }

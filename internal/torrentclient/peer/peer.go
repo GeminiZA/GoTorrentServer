@@ -19,3 +19,10 @@ func New() (*Peer, error) {
 	peer := Peer{Interested: false, Choked: true, PeerChoking: true, PeerInterested: false, }
 	return &peer, nil
 }
+
+func Connect() error {
+	return nil
+}
+
+
+func NewFormIn(conn net.Conn)

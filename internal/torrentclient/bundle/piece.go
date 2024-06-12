@@ -40,6 +40,7 @@ func NewPiece(length int64, pieceByteOffset int64, hash []byte) *Piece {
 			curBlockLength = length - curByte
 		}
 		piece.blocks = append(piece.blocks, newBlock(curBlockLength))
+		curByte += curBlockLength
 	}
 	return &piece
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
 
+const DEBUG_TRACKER bool = false
+
 type Tracker struct {
 	instantiated bool
 	started bool
@@ -30,8 +32,7 @@ type Tracker struct {
 }
 
 func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) (*Tracker) {
-	var tracker Tracker
-
+	tracker := Tracker{}
 	tracker.InfoHash = infoHash
 	tracker.TrackerUrl = trackerUrl
 	tracker.Port = port
@@ -51,6 +52,9 @@ func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploade
 func (tracker *Tracker) parseBody(body []byte) error {
 	bodyDict, err := bencode.Parse(&body)
 	fmt.Printf("Successfully parsed body\n")
+	if DEBUG_TRACKER {
+		fmt.Println(bodyDict)
+	}
 	if err != nil {
 		return err
 	}
@@ -100,7 +104,9 @@ func (tracker *Tracker) parseBody(body []byte) error {
 		}
 	}
 	if peers, ok := bodyDict["peers"]; ok {
-		fmt.Printf("Found peers: %v\n", peers)
+		if DEBUG_TRACKER {
+			fmt.Printf("Found peers: %v\n", peers)
+		}
 		if peersListInter, ok := peers.([]interface{}); ok {
 			peersList := make([]map[string]interface{}, 0)
 			for _, inter := range peersListInter {

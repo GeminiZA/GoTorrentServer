@@ -32,34 +32,34 @@ type Message struct {
 	Piece []byte
 	Port uint32
 	PeerID string
-	InfoHash string
+	InfoHash []byte
 }
 
-func (m Message) GetBytes() ([]byte, error) {
+func (m Message) GetBytes() []byte {
 	switch m.Type {
 	case KEEP_ALIVE:
-		return []byte{0, 0, 0, 0}, nil
+		return []byte{0, 0, 0, 0}
 	case CHOKE:
-		return []byte{0, 0, 0, 1, 0}, nil
+		return []byte{0, 0, 0, 1, 0}
 	case UNCHOKE:
-		return []byte{0, 0, 0, 1, 1}, nil
+		return []byte{0, 0, 0, 1, 1}
 	case INTERESTED:
-		return []byte{0, 0, 0, 1, 2}, nil
+		return []byte{0, 0, 0, 1, 2}
 	case NOT_INTERESTED:
-		return []byte{0, 0, 0, 1, 3}, nil
+		return []byte{0, 0, 0, 1, 3}
 	case HAVE:
 		index := make([]byte, 4)
 		binary.BigEndian.PutUint32(index, m.Index)
 		ret := []byte{0, 0, 0, 5, 4}
 		ret = append(ret, index...)
-		return ret, nil
+		return ret
 	case BITFIELD:
 		len := uint32(1) + m.Length
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, len)
 		ret = append(ret, 5)
 		ret = append(ret, m.BitField...)
-		return ret, nil
+		return ret
 	case REQUEST:
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, 13)
@@ -73,7 +73,7 @@ func (m Message) GetBytes() ([]byte, error) {
 		ret = append(ret, partIndex...)
 		ret = append(ret, beginOffset...)
 		ret = append(ret, reqLength...)
-		return ret, nil
+		return ret
 	case PIECE:
 		len := 9 + uint32(len(m.Piece))
 		lenBytes := make([]byte, 4)
@@ -88,7 +88,7 @@ func (m Message) GetBytes() ([]byte, error) {
 		ret = append(ret, partIndex...)
 		ret = append(ret, beginOffset...)
 		ret = append(ret, m.Piece...)
-		return ret, nil
+		return ret
 	case CANCEL:
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, 13)
@@ -102,13 +102,13 @@ func (m Message) GetBytes() ([]byte, error) {
 		ret = append(ret, partIndex...)
 		ret = append(ret, beginOffset...)
 		ret = append(ret, reqLength...)
-		return ret, nil
+		return ret
 	case PORT:
 		portBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(portBytes, m.Port)
 		ret := []byte{0,0,0,3,9}
 		ret = append(ret, portBytes...)
-		return ret, nil
+		return ret
 	case HANDSHAKE:
 		pstr := []byte("BitTorrent Protocol")
 		pstrlen := byte(len(pstr))
@@ -120,9 +120,9 @@ func (m Message) GetBytes() ([]byte, error) {
 		ret = append(ret, reserved...)
 		ret = append(ret, infoHash...)
 		ret = append(ret, peerID...)
-		return ret, nil
+		return ret
 	}
-	return nil, nil
+	return nil
 }
 
 func ParseHandshake(data []byte) (*Message, error) {
@@ -137,7 +137,7 @@ func ParseHandshake(data []byte) (*Message, error) {
 	i = i + int(pstrlen)
 	//_ = data[i:i+8] // reserved bytes
 	i += 8
-	msg.InfoHash = string(data[i:i+20])
+	msg.InfoHash = data[i:i+20]
 	i += 20
 	msg.PeerID = string(data[i:i+20])
 	return &msg, nil
@@ -236,7 +236,7 @@ func (msg *Message) Print() {
 	}
 }
 
-func NewHandshake(infoHash string, peerID string) *Message {
+func NewHandshake(infoHash []byte, peerID string) *Message {
 	msg := Message{Type: HANDSHAKE}
 	msg.InfoHash = infoHash
 	msg.PeerID = peerID

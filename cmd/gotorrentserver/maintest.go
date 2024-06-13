@@ -51,9 +51,25 @@ func main() {
 		}
 		fmt.Printf("Connected to peer: %s", peer.PeerID)
 		time.Sleep(time.Second * 2)
-		err = peer.SetInterested()
+		err = peer.SendInterested()
 		if err != nil {
 			panic(err)
+		}
+		time.Sleep(2 * time.Second)
+		err = peer.SendUnchoke()
+		if err != nil {
+			panic(err)
+		}
+		time.Sleep(2 * time.Second)
+		pieceIndex, beginOffset, length, err := bundle.NextBlock()
+		if err != nil {
+			panic(err)
+		}
+		if !peer.PeerChoking {
+			err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
+			if err != nil {
+				panic(err)
+			}
 		}
 		for peer.IsConnected() {
 			time.Sleep(2 * time.Second)

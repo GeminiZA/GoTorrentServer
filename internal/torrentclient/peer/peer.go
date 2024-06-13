@@ -1,3 +1,4 @@
+// Keepalive not working
 package peer
 
 import (
@@ -85,7 +86,7 @@ func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID strin
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Printf("Handshake received: peerID: %s, infoHash: %s\n", replyHandshake.PeerID, string(replyHandshake.InfoHash))
 	fmt.Printf("Handshake reserved: ")
 	for _, b := range replyHandshake.Reserved {
 		fmt.Printf("%08b ", b)
@@ -96,7 +97,7 @@ func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID strin
 	peer.PeerID = replyHandshake.PeerID
 	peer.keepAlive = true
 	peer.isConnected = true
-	//go peer.keepPeerAlive()
+	go peer.keepPeerAlive()
 	go peer.handleConn()
 	return &peer, nil
 }
@@ -129,6 +130,20 @@ func (peer *Peer) handleConn() {
 			time.Sleep(2 * time.Second)
 			continue
 		}
+		switch msg.Type {
+		case message.CHOKE:
+			peer.PeerChoking = true
+		case message.UNCHOKE:
+			peer.PeerChoking = false
+		case message.INTERESTED:
+			peer.PeerInterested = true
+		case message.NOT_INTERESTED:
+			peer.PeerInterested = false
+		case message.BITFIELD:
+			peer.bitfield = bitfield.LoadBytes(msg.BitField)
+		case message.KEEP_ALIVE:
+			//Todo
+		}
 		msg.Print()
 	}
 }
@@ -138,7 +153,7 @@ func (peer *Peer) keepPeerAlive() {
 		if !peer.isConnected {
 			return
 		}
-		if time.Now().Add(time.Second * 15).After(peer.lastMsgTime) {
+		if peer.lastMsgTime.After(time.Now().Add(time.Second * 15)) {
 			_, err := peer.conn.Write(message.NewKeepAlive().GetBytes())
 			if err != nil {
 				fmt.Println(err)
@@ -152,15 +167,72 @@ func (peer *Peer) keepPeerAlive() {
 
 //Message interface
 
-func (peer *Peer) SetInterested() error {
+func (peer *Peer) SendInterested() error {
 	msg := message.NewInterested()
 	_, err := peer.conn.Write(msg.GetBytes())
 	if err != nil {
 		return err
 	}
 	peer.lastMsgTime = time.Now()
+	peer.Interested = true
 	if PEER_DEBUG {
 		fmt.Printf("Sent Interested to: %s\n", peer.PeerID)
+	}
+	return nil
+}
+
+func (peer *Peer) SendNotInterested() error {
+	msg := message.NewNotInterested()
+	_, err := peer.conn.Write(msg.GetBytes())
+	if err != nil {
+		return err
+	}
+	peer.lastMsgTime = time.Now()
+	peer.Interested = false
+	if PEER_DEBUG {
+		fmt.Printf("Sent Interested to: %s\n", peer.PeerID)
+	}
+	return nil
+}
+
+func (peer *Peer) SendUnchoke() error {
+	msg := message.NewUnchoke()
+	_, err := peer.conn.Write(msg.GetBytes())
+	if err != nil {
+		return err
+	}
+	peer.lastMsgTime = time.Now()
+	peer.Choked = false
+	if PEER_DEBUG {
+		fmt.Printf("Sent Unchoke to: %s\n", peer.PeerID)
+	}
+	return nil
+}
+
+func (peer *Peer) SendChoke() error {
+	msg := message.NewChoke()
+	_, err := peer.conn.Write(msg.GetBytes())
+	if err != nil {
+		return err
+	}
+	peer.lastMsgTime = time.Now()
+	peer.Choked = true
+	if PEER_DEBUG {
+		fmt.Printf("Sent Choke to: %s\n", peer.PeerID)
+	}
+	return nil
+}
+
+func (peer *Peer) SendRequestBlock(pieceIndex int64, beginOffset int64, length int64) error {
+	msg := message.NewRequest(pieceIndex, beginOffset, length)
+	fmt.Printf("request bytes: %s\n", string(msg.GetBytes()))
+	_, err := peer.conn.Write(msg.GetBytes())
+	if err != nil {
+		return err
+	}
+	peer.lastMsgTime = time.Now()
+	if PEER_DEBUG {
+		fmt.Printf("Sent Request to: %s\n", peer.PeerID)
 	}
 	return nil
 }

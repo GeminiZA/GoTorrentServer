@@ -274,11 +274,11 @@ func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns piec
 	beginOffset := int64(0)
 	curByte := int64(0)
 	for _, block := range bundle.Pieces[pieceIndex].blocks {
+		curByte += block.length
 		if !block.written {
 			beginOffset = curByte
 			break
 		}
-		curByte += block.length
 	}
 	length := curByte - beginOffset
 	return pieceIndex, beginOffset, length, nil

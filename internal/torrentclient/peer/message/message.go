@@ -66,6 +66,7 @@ func (m Message) GetBytes() []byte {
 	case REQUEST:
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, 13)
+		fmt.Printf("RET: %v\n", ret)
 		ret = append(ret, 6)
 		partIndex := make([]byte, 4)
 		binary.BigEndian.PutUint32(partIndex, m.Index)
@@ -154,8 +155,8 @@ func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
 		return nil, errors.New("invalid protocol string")
 	}
 	msg.Reserved = rest[pstrlen : pstrlen + 8]
-	msg.InfoHash = rest[pstrlen + 8:28]
-	msg.PeerID = string(rest[pstrlen + 28:48])
+	msg.InfoHash = rest[pstrlen + 8:pstrlen + 28]
+	msg.PeerID = string(rest[pstrlen + 28: pstrlen + 48])
 	return &msg, nil
 }
 
@@ -286,8 +287,8 @@ func NewBitfield(bitfield []byte) *Message {
 	return &Message{Type: BITFIELD, BitField: bitfield}
 }
 
-func NewRequest(index uint32, beginOffset uint32, length uint32) *Message {
-	return &Message{Type: REQUEST, Index: index, Begin: beginOffset, Length: length}
+func NewRequest(index int64, beginOffset int64, length int64) *Message {
+	return &Message{Type: REQUEST, Index: uint32(index), Begin: uint32(beginOffset), Length: uint32(length)}
 }
 
 func NewPiece(index uint32, beginOffset uint32, block []byte) *Message {

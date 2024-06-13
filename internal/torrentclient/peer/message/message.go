@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
+	"time"
 )
 
 type MessageType int
@@ -126,35 +128,63 @@ func (m Message) GetBytes() []byte {
 	return nil
 }
 
-func ParseHandshake(data []byte) (*Message, error) {
+func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
 	msg := Message{Type: HANDSHAKE}
-	i := byte(0)
-	pstrlen := data[i]
-	i++
-	pstr := string(data[i:i+pstrlen])
-	if pstr != "BitTorrent protocol" {
+	deadline := time.Now().Add(timeout)
+	pstrlenBytes := make([]byte, 1)
+	err := conn.SetReadDeadline(deadline)
+	if err != nil {
+		return nil, err
+	}
+	_, err = conn.Read(pstrlenBytes)
+	if err != nil {
+		return nil, err
+	}
+	pstrlen := pstrlenBytes[0]
+	if pstrlen != 19 {
 		return nil, errors.New("invalid protocol string")
 	}
-	i = i + pstrlen
-	msg.Reserved = data[i:i+8] // reserved bytes
-	i += 8
-	msg.InfoHash = data[i:i+20]
-	i += 20
-	msg.PeerID = string(data[i:i+20])
-	return &msg, nil
+	restLen := pstrlen + 48 // reserved (8) infohash (20) peerID (20)
+	rest := make([]byte, restLen) 
+	_, err = conn.Read(rest)
+	if err != nil {
+		return nil, err
+	}
+	if string(rest[0:pstrlen]) != "BitTorrent protocol" {
+		return nil, errors.New("invalid protocol string")
+	}
+	msg.InfoHash = rest[pstrlen + 8:28]
+	msg.PeerID = string(rest[pstrlen + 28:48])
+	return nil, nil
 }
 
-func ParseMessage(data []byte) (*Message, error) {
-	if len(data) < 4 {
-		return nil, errors.New("invalid message, no length")
+func ReadMessage(conn net.Conn) (*Message, error) {
+	const MAX_MESSAGE_LENGTH = 17 * 1024
+	msgLenBytes := make([]byte, 4)
+	_, err := conn.Read(msgLenBytes)
+	if err != nil {
+		return nil, err
 	}
-	lenBytes := data[0:4]
-	messageLen := binary.BigEndian.Uint32(lenBytes)
-	if messageLen == 0 {
+	msgLen := binary.BigEndian.Uint32(msgLenBytes)
+	if msgLen > MAX_MESSAGE_LENGTH {
+		return nil, errors.New("message exceeds max length")
+	}
+	if msgLen == 0 {
 		return &Message{Type: KEEP_ALIVE}, nil
 	}
-	id := data[4]
-	switch id {
+	msgBytes := make([]byte, 0)
+	bytesRead := 0
+	for bytesRead < int(msgLen) {
+		buf := make([]byte, msgLen)
+		n, err := conn.Read(buf)
+		if err != nil {
+			return nil, err
+		}
+		msgBytes = append(msgBytes, buf[:n]...)
+		bytesRead += n
+	}
+	msgID := msgBytes[0]
+	switch msgID {
 	case 0: // choke
 		return &Message{Type: CHOKE}, nil
 	case 1: // unchoke
@@ -164,50 +194,31 @@ func ParseMessage(data []byte) (*Message, error) {
 	case 3: // not interested
 		return &Message{Type: NOT_INTERESTED}, nil
 	case 4: // have
-		if len(data) < 5 {
-			return nil, errors.New("length not enough")
-		}
-		pieceIndex := binary.BigEndian.Uint32(data[1:5])
+		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
 		return &Message{Type: HAVE, Index: pieceIndex}, nil
 	case 5: // bitfield
-		if uint32(len(data)) < 4 + messageLen + 1 {
-			return nil, errors.New("length not enough")
-		}
-		bitField := data[5:4 + messageLen + 1]
+		bitField := msgBytes[5:msgLen]
 		return &Message{Type: BITFIELD, BitField: bitField}, nil
 	case 6: // request
-		if len(data) < 17 {
-			return nil, errors.New("length not enough for type")
-		}
-		pieceIndex := binary.BigEndian.Uint32(data[1:5])
-		beginOffset := binary.BigEndian.Uint32(data[5:9])
-		blockLength := binary.BigEndian.Uint32(data[9:13])
+		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
+		beginOffset := binary.BigEndian.Uint32(msgBytes[5:9])
+		blockLength := binary.BigEndian.Uint32(msgBytes[9:13])
 		return &Message{Type: REQUEST, Index: pieceIndex, Begin: beginOffset, Length: blockLength}, nil
 	case 7: // piece
-		if uint32(len(data)) < 4 + messageLen + 1 {
-			return nil, errors.New("length not enough")
-		}
-		pieceIndex := binary.BigEndian.Uint32(data[1:5])
-		beginOffset := binary.BigEndian.Uint32(data[5:9])
-		block := data[9:messageLen+4+1]
+		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
+		beginOffset := binary.BigEndian.Uint32(msgBytes[5:9])
+		block := msgBytes[9:msgLen]
 		return &Message{Type: PIECE, Index: pieceIndex, Begin: beginOffset, Piece: block}, nil
 	case 8: // cancel
-		if len(data) < 17 {
-			return nil, errors.New("length not enough for type")
-		}
-		pieceIndex := binary.BigEndian.Uint32(data[1:5])
-		beginOffset := binary.BigEndian.Uint32(data[5:9])
-		blockLength := binary.BigEndian.Uint32(data[9:13])
+		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
+		beginOffset := binary.BigEndian.Uint32(msgBytes[5:9])
+		blockLength := binary.BigEndian.Uint32(msgBytes[9:13])
 		return &Message{Type: CANCEL, Index: pieceIndex, Begin: beginOffset, Length: blockLength}, nil
 	case 9: // port
-		if len(data) < 7 {
-			return nil, errors.New("length not enough")
-		}
-		port := binary.BigEndian.Uint32(data[5:9])
+		port := binary.BigEndian.Uint32(msgBytes[5:9])
 		return &Message{Type: PORT, Port: port}, nil
 	}
-	fmt.Println("Returned nil message after parsing")
-	return nil, nil
+	return nil, errors.New("invalid message id")
 }
 
 func (msg *Message) Print() {

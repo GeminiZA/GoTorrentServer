@@ -17,7 +17,7 @@ func main() {
 	fmt.Printf("Name: %s\nLength: %d\nPieceLength:%d\n", tf.Info.Name, tf.Info.Length, tf.Info.PieceLength)
 	fmt.Printf("Piece hash length: %d\n", len(tf.Info.Pieces[0]))
 	fmt.Println("Creating Bundle...")
-	bundle, err := bundle.NewBundle(tf, "")
+	bundle, err := bundle.NewBundle(tf, "", 20)
 	if err != nil {
 		panic(err)
 	}

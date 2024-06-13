@@ -33,11 +33,18 @@ type Bundle struct {
 	MultiFile bool
 	BitField *bitfield.BitField
 	Complete bool
+	pieceCache *PieceCache
 	mux sync.Mutex
 }
 
-func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, error) {
-	bundle := Bundle{Name: metaData.Info.Name, PieceLength: metaData.Info.PieceLength, Complete: false, Path: bundlePath}
+func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheCapacity int) (*Bundle, error) {
+	bundle := Bundle{
+		Name: metaData.Info.Name,
+		PieceLength: metaData.Info.PieceLength, 
+		Complete: false, 
+		Path: bundlePath,
+		pieceCache: NewPieceCache(pieceCacheCapacity),
+	}
 	totalLength := int64(0)
 	//Files
 	if metaData.Info.Length == 0 {
@@ -197,18 +204,10 @@ func (bundle *Bundle) WritePiece(pieceIndex int64) error {
 	return nil
 }
 
-func (bundle *Bundle) LoadPiece(pieceIndex int64) error {
-	return nil
-}
-
-func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
-	bundle.mux.Lock()
-	defer bundle.mux.Unlock()
-	
-	//Read block from file directly
-	block := []byte{}
-	bytesLeft := length
-	byteOffset := bundle.Pieces[pieceIndex].ByteOffset + beginOffset
+func (bundle *Bundle) loadPiece(pieceIndex int64) error {
+	pieceBytes := []byte{}
+	bytesLeft := bundle.Pieces[pieceIndex].length
+	byteOffset := bundle.Pieces[pieceIndex].ByteOffset
 	for _, bundleFile := range bundle.Files {
 		if bundleFile.ByteStart <= byteOffset && bundleFile.ByteStart + bundleFile.Length <= byteOffset {
 			fileByteOffset := byteOffset - bundleFile.ByteStart			
@@ -218,14 +217,15 @@ func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64
 			}
 			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0777)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			defer file.Close()
 			buf := make([]byte, readLen)
 			_, err = file.ReadAt(buf, fileByteOffset)
 			if err != nil {
-				return nil, err
+				return err
 			}
+			pieceBytes = append(pieceBytes, buf...)
 			bytesLeft -= readLen
 			byteOffset += readLen
 			if bytesLeft == 0 {
@@ -233,7 +233,24 @@ func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64
 			}
 		}
 	}
-	return block, nil
+	bundle.pieceCache.Put(pieceIndex, pieceBytes)
+	return nil
+}
+
+func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
+	
+	if !bundle.pieceCache.Contains(pieceIndex) {
+		bundle.loadPiece(pieceIndex)
+	}
+	pieceBytes := bundle.pieceCache.Get(pieceIndex)
+
+	if length + beginOffset > bundle.Pieces[pieceIndex].length {
+		return nil, errors.New("block overflows piece bounds")
+	}
+
+	return pieceBytes[beginOffset : length + beginOffset], nil
 }
 
 func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns pieceIndex, beginOffset, blockLength

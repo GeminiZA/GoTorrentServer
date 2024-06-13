@@ -1,9 +1,7 @@
 package peer
 
 import (
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"time"
 
@@ -83,60 +81,19 @@ func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID strin
 		fmt.Println("Wrote handshake...")
 	}
 
-	handshakeReplyBytes := []byte{}
-	//Read pstrlen
-	pstrlenBytes := make([]byte, 1)
-	deadline := time.Now().Add(timeoutDuration)
-	err = conn.SetReadDeadline(deadline)
+	replyHandshake, err := message.ReadHandshake(conn, 3000 * time.Millisecond)
 	if err != nil {
-		return nil, err
-	}
-	_, err = conn.Read(pstrlenBytes)
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			fmt.Println("handshake timed out...")
-			conn.Close()
-			return nil, err
-		} else {
-			conn.Close()
-			return nil, err
-		}
-	}
-	pstrlen := pstrlenBytes[0]
-	fmt.Printf("Read pstrlen: %x\n", pstrlen)
-	handshakeReplyBytes = append(handshakeReplyBytes, pstrlenBytes...)
-	rest := make([]byte, 48+pstrlen)
-	//Read pstr
-	_, err = conn.Read(rest)
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			fmt.Println("handshake timed out...")
-			conn.Close()
-			return nil, err
-		} else {
-			conn.Close()
-			return nil, err
-		}
-	}
-	handshakeReplyBytes = append(handshakeReplyBytes, rest...)
-
-	if PEER_DEBUG {
-		fmt.Printf("Got handshake reply (len: %d): %s\n", len(handshakeReplyBytes), string(handshakeReplyBytes))
-	}
-	replyMsg, err := message.ParseHandshake(handshakeReplyBytes)
-	if err != nil {
-		conn.Close()
 		return nil, err
 	}
 
 	fmt.Printf("Handshake reserved: ")
-	for _, b := range replyMsg.Reserved {
+	for _, b := range replyHandshake.Reserved {
 		fmt.Printf("%08b ", b)
 	}
 	fmt.Print("\n")
 
 	peer.conn = conn
-	peer.PeerID = replyMsg.PeerID
+	peer.PeerID = replyHandshake.PeerID
 	peer.keepAlive = true
 	peer.isConnected = true
 	//go peer.keepPeerAlive()
@@ -154,42 +111,22 @@ func (peer *Peer) IsConnected() bool {
 	return peer.isConnected
 }
 
-func (peer *Peer) HandleHandshake() error {
-	
-}
-
 func (peer *Peer) handleConn() {
 	for peer.isConnected {
 		fmt.Println("Waiting for message...")
-		msglenBytes := make([]byte, 4)
-		_, err := peer.conn.Read(msglenBytes)
+		msg, err := message.ReadMessage(peer.conn)
 		if err != nil {
-			fmt.Println("peer.handleConn error:")
-			fmt.Println(err)
-			if err == io.EOF {
-				fmt.Println("peer closed the connection")
-				return
+			netErr, ok := err.(net.Error)
+			if ok && netErr.Timeout() {
+				if PEER_DEBUG {
+					fmt.Println("no message read")
+				}
+				time.Sleep(time.Second)
+				continue
 			}
-			return
-		}
-		msglen := binary.BigEndian.Uint32(msglenBytes)
-		fmt.Printf("Reading message length:  %d\n", msglen)
-		buf := make([]byte, msglen)
-		n, err := peer.conn.Read(buf)
-		if err != nil {
 			fmt.Println("peer.handleConn error:")
 			fmt.Println(err)
-			if err == io.EOF {
-				fmt.Println("peer closed the connection")
-				return
-			}
-			return
-		}
-		fmt.Printf("Got message (len: %d): %x\n", n,  buf[:n])
-		msg, err := message.ParseMessage(buf[:n])
-		if err != nil {
-			fmt.Println("peer.handleConn error:")
-			fmt.Println(err)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 		msg.Print()
@@ -211,4 +148,19 @@ func (peer *Peer) keepPeerAlive() {
 		}
 		time.Sleep(time.Second) //every second
 	}
+}
+
+//Message interface
+
+func (peer *Peer) SetInterested() error {
+	msg := message.NewInterested()
+	_, err := peer.conn.Write(msg.GetBytes())
+	if err != nil {
+		return err
+	}
+	peer.lastMsgTime = time.Now()
+	if PEER_DEBUG {
+		fmt.Printf("Sent Interested to: %s\n", peer.PeerID)
+	}
+	return nil
 }

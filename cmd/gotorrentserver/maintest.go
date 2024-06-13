@@ -50,6 +50,11 @@ func main() {
 			continue
 		}
 		fmt.Printf("Connected to peer: %s", peer.PeerID)
+		time.Sleep(time.Second * 2)
+		err = peer.SetInterested()
+		if err != nil {
+			panic(err)
+		}
 		for peer.IsConnected() {
 			time.Sleep(2 * time.Second)
 		}

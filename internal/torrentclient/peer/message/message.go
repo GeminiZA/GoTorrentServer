@@ -153,9 +153,10 @@ func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
 	if string(rest[0:pstrlen]) != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
+	msg.Reserved = rest[pstrlen : pstrlen + 8]
 	msg.InfoHash = rest[pstrlen + 8:28]
 	msg.PeerID = string(rest[pstrlen + 28:48])
-	return nil, nil
+	return &msg, nil
 }
 
 func ReadMessage(conn net.Conn) (*Message, error) {

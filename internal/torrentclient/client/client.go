@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/listenport"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
@@ -14,12 +16,23 @@ type TorrentClient struct {
 	TorrentFiles []*torrentfile.TorrentFile
 	started bool
 	DBConnected bool
+	lp *listenport.ListenPort
+	newPeerChan chan<-*peer.Peer
+	lpPort int
+	running bool
+	curNumPeers int
+	maxPeers int
 }
 
-func New() (*TorrentClient, error) {
+func New(listenPort int) (*TorrentClient, error) {
 	var client TorrentClient
+	var err error
 	client.started = false
 	client.DBConnected = false
+	client.lp, err = listenport.New(listenPort, client.newPeerChan)
+	if err != nil {
+		return nil, err
+	}
 	return &client, nil
 }
 
@@ -29,7 +42,17 @@ func (tc *TorrentClient) Start() error {
 	if err != nil {
 		return err
 	}
+	tc.running = true
 	return nil
+}
+
+func (tc *TorrentClient) Listen() error {
+	var errCh chan<-error
+	go tc.lp.Start(errCh)
+	defer tc.lp.Stop()
+	for tc.running {
+		newPeer := <-tc.newPeerChan
+	}
 }
 
 func (tc *TorrentClient) Stop() []error {

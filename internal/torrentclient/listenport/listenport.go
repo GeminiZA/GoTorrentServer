@@ -22,10 +22,10 @@ type ListenPort struct {
 	initialized bool
 	running bool
 	stopped bool
-	InboundPeers []peer.Peer
+	newPeerChan chan<-*peer.Peer
 }
 
-func New(internalPort int) (*ListenPort, error) {
+func New(internalPort int, peerChannel chan<-*peer.Peer) (*ListenPort, error) {
 	lp := ListenPort{
 		internalPort: internalPort, 
 		initialized: true, 
@@ -69,7 +69,7 @@ func handleConn(conn net.Conn, peerCh chan<-*peer.Peer, errCh chan<-error) {
 	
 }
 
-func (lp *ListenPort) Start(peerCh chan<-*peer.Peer, errCh chan<-error) error {
+func (lp *ListenPort) Start(errCh chan<-error) error {
 	if !lp.initialized {
 		return errors.New("listen port not correctly initialized")
 	}
@@ -78,7 +78,7 @@ func (lp *ListenPort) Start(peerCh chan<-*peer.Peer, errCh chan<-error) error {
 	}
 	lp.stopped = false
 	lp.running = true
-	go lp.listen(peerCh, errCh)
+	go lp.listen(lp.newPeerChan, errCh)
 	return nil
 }
 

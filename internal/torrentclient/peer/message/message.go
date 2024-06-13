@@ -33,6 +33,7 @@ type Message struct {
 	Port uint32
 	PeerID string
 	InfoHash []byte
+	Reserved []byte
 }
 
 func (m Message) GetBytes() []byte {
@@ -110,13 +111,13 @@ func (m Message) GetBytes() []byte {
 		ret = append(ret, portBytes...)
 		return ret
 	case HANDSHAKE:
-		pstr := []byte("BitTorrent Protocol")
-		pstrlen := byte(len(pstr))
+		pstr := []byte("BitTorrent protocol")
+		pstrlen := byte(19)
 		reserved := make([]byte, 8)
 		infoHash := []byte(m.InfoHash)
 		peerID := []byte(m.PeerID)
-		ret := pstr
-		ret = append(ret, pstrlen)
+		ret := []byte{pstrlen}
+		ret = append(ret, pstr...)
 		ret = append(ret, reserved...)
 		ret = append(ret, infoHash...)
 		ret = append(ret, peerID...)
@@ -127,15 +128,15 @@ func (m Message) GetBytes() []byte {
 
 func ParseHandshake(data []byte) (*Message, error) {
 	msg := Message{Type: HANDSHAKE}
-	i := 0
-	pstrlen := int(data[i])
+	i := byte(0)
+	pstrlen := data[i]
 	i++
 	pstr := string(data[i:i+pstrlen])
-	if pstr != "BitTorrent Protocol" {
+	if pstr != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
-	i = i + int(pstrlen)
-	//_ = data[i:i+8] // reserved bytes
+	i = i + pstrlen
+	msg.Reserved = data[i:i+8] // reserved bytes
 	i += 8
 	msg.InfoHash = data[i:i+20]
 	i += 20
@@ -233,6 +234,8 @@ func (msg *Message) Print() {
 		fmt.Printf("{Type: cancel, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PORT:
 		fmt.Printf("{Type: port, port: %d}\n", msg.Port)
+	case HANDSHAKE:
+		fmt.Printf("Type: handshake, peerID: %s", msg.PeerID)
 	}
 }
 

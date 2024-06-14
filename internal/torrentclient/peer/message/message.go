@@ -38,7 +38,7 @@ type Message struct {
 	Reserved []byte
 }
 
-func (m Message) GetBytes() []byte {
+func (m *Message) GetBytes() []byte {
 	switch m.Type {
 	case KEEP_ALIVE:
 		return []byte{0, 0, 0, 0}
@@ -66,7 +66,6 @@ func (m Message) GetBytes() []byte {
 	case REQUEST:
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, 13)
-		fmt.Printf("RET: %v\n", ret)
 		ret = append(ret, 6)
 		partIndex := make([]byte, 4)
 		binary.BigEndian.PutUint32(partIndex, m.Index)

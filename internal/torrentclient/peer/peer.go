@@ -225,7 +225,6 @@ func (peer *Peer) SendChoke() error {
 
 func (peer *Peer) SendRequestBlock(pieceIndex int64, beginOffset int64, length int64) error {
 	msg := message.NewRequest(pieceIndex, beginOffset, length)
-	fmt.Printf("request bytes: %s\n", string(msg.GetBytes()))
 	_, err := peer.conn.Write(msg.GetBytes())
 	if err != nil {
 		return err

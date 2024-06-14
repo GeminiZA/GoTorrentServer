@@ -50,21 +50,35 @@ func main() {
 			continue
 		}
 		fmt.Printf("Connected to peer: %s", peer.PeerID)
-		time.Sleep(time.Second * 2)
 		err = peer.SendInterested()
 		if err != nil {
 			panic(err)
 		}
-		time.Sleep(2 * time.Second)
-		err = peer.SendUnchoke()
-		if err != nil {
-			panic(err)
+		//time.Sleep(2 * time.Second)
+		//err = peer.SendUnchoke()
+		//if err != nil {
+			//panic(err)
+		//}
+		// FOr some reason getting piece response now when not waiting between messages
+		for peer.PeerChoking {
+			time.Sleep(2 * time.Second)
 		}
-		time.Sleep(2 * time.Second)
 		pieceIndex, beginOffset, length, err := bundle.NextBlock()
 		if err != nil {
 			panic(err)
 		}
+		time.Sleep(2 * time.Second) // still responds after added 2s wait I think it's because I sent interested after connecting
+		if !peer.PeerChoking {
+			err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
+			if err != nil {
+				panic(err)
+			}
+		}
+		pieceIndex, beginOffset, length, err = bundle.NextBlock()
+		if err != nil {
+			panic(err)
+		}
+		time.Sleep(2 * time.Second) // still responds after added 2s wait I think it's because I sent interested after connecting
 		if !peer.PeerChoking {
 			err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
 			if err != nil {

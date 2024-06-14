@@ -265,20 +265,21 @@ func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns piec
 			break
 		}
 	}
-	for i := 0; i < 8; i++ {
-		if !bundle.BitField.GetBit(int64(nextByte) + int64(i)) {
-			pieceIndex = nextByte + int64(i)
+	for i := int64(0); i < 8; i++ {
+		if !bundle.BitField.GetBit(nextByte * 8 + i) {
+			pieceIndex = nextByte * 8 + i
 			break
 		}
 	}
 	beginOffset := int64(0)
 	curByte := int64(0)
 	for _, block := range bundle.Pieces[pieceIndex].blocks {
-		curByte += block.length
 		if !block.written {
 			beginOffset = curByte
+			curByte += block.length
 			break
 		}
+		curByte += block.length
 	}
 	length := curByte - beginOffset
 	return pieceIndex, beginOffset, length, nil

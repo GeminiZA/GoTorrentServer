@@ -31,8 +31,8 @@ func (bf *BitField) GetAll() []byte {
 	return bf.Bytes
 }
 
-func (bf *BitField) Len() int {
-	return len(bf.Bytes) * 8
+func (bf *BitField) Len() int64 {
+	return int64(len(bf.Bytes)) * 8
 }
 
 func (bf *BitField) SetBit(index int64) error {

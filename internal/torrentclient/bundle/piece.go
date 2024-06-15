@@ -1,82 +1,85 @@
-// Interface for only writing and storing pieces and blocks
+// Interface for only writing and storing pieces and.Blocks
 package bundle
 
 import (
 	"bytes"
 	"crypto/sha1"
 	"errors"
+	"fmt"
 )
 
 type Block struct {
-	length     int64
-	written    bool
+	Length     int64
+	Written    bool
 	bytes 	   []byte
-	fetching   bool
+	Fetching   bool
 }
 
 type Piece struct {
-	blocks     []*Block
-	complete   bool
+	Blocks     []*Block
+	Complete   bool
 	hash 	   []byte
 	length	   int64
 	ByteOffset int64
 }
 
 func newBlock(length int64) *Block {
-	return &Block{length: length, written: false}
+	return &Block{Length: length, Written: false, Fetching: false, bytes: nil}
 }
 
 func (block *Block) write(bytes []byte) {
 	block.bytes = bytes
-	block.written = true
+	block.Written = true
 }
 
 func NewPiece(length int64, pieceByteOffset int64, hash []byte) *Piece {
 	const MAX_BLOCK_LENGTH int64 = 16384
-	piece := Piece{length: length, hash: hash, ByteOffset: pieceByteOffset, complete: false}
+	piece := Piece{length: length, hash: hash, ByteOffset: pieceByteOffset, Complete: false}
 	curByte := int64(0)
 	for curByte < length {
 		curBlockLength := MAX_BLOCK_LENGTH
 		if curByte + MAX_BLOCK_LENGTH > length {
 			curBlockLength = length - curByte
 		}
-		piece.blocks = append(piece.blocks, newBlock(curBlockLength))
+		piece.Blocks = append(piece.Blocks, newBlock(curBlockLength))
 		curByte += curBlockLength
 	}
 	return &piece
 }
 
 func (piece *Piece) Reset() {
-	for _, block := range piece.blocks {
-		block.written = false
+	for _, block := range piece.Blocks {
+		block.Written = false
 		block.bytes = nil
 	}
-}
-
-func (piece *Piece) Complete() bool {
-	return piece.complete
 }
 
 func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
 	curByte := int64(0)
 	blockIndex := 0
-	for i, block := range piece.blocks {
+	for i, block := range piece.Blocks {
 		if curByte == beginOffset {
 			blockIndex = i
 			break
 		}
-		curByte += block.length
+		curByte += block.Length
 	}
 	if curByte == piece.length {
 		return errors.New("could not find block")
 	}
-	if piece.blocks[blockIndex].written {
+	if piece.Blocks[blockIndex].Written {
 		return errors.New("block already written")
 	}
-	if piece.blocks[blockIndex].length != int64(len(bytes)) {
+	if piece.Blocks[blockIndex].Length != int64(len(bytes)) {
 		return errors.New("block length incorrect")
 	}
-	piece.blocks[blockIndex].write(bytes)
+	if BUNDLE_DEBUG {
+		fmt.Printf("Found block to write: block index: %d\n", blockIndex)
+	}
+	piece.Blocks[blockIndex].write(bytes)
+	if BUNDLE_DEBUG {
+		fmt.Printf("Block Written successfully: block index: %d\n", blockIndex)
+	}
 	if piece.checkFull() {
 		correct, err := piece.checkHash()
 		if err != nil {
@@ -85,7 +88,7 @@ func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
 		if !correct {
 			piece.Reset()
 		} else {
-			piece.complete = true
+			piece.Complete = true
 		}
 	}
 	return nil
@@ -93,7 +96,7 @@ func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
 
 func (piece *Piece) checkHash() (bool, error) {
 	hasher := sha1.New()
-	for _, block := range piece.blocks {
+	for _, block := range piece.Blocks {
 		_, err := hasher.Write(block.bytes)
 		if err != nil {
 			return false, err
@@ -104,8 +107,11 @@ func (piece *Piece) checkHash() (bool, error) {
 }
 
 func (piece *Piece) checkFull() bool {
-	for _, block := range piece.blocks {
-		if !block.written {
+	for _, block := range piece.Blocks {
+		if !block.Written {
+			if BUNDLE_DEBUG {
+				fmt.Println("Piece not full yet...")
+			}
 			return false
 		}
 	}
@@ -114,7 +120,7 @@ func (piece *Piece) checkFull() bool {
 
 func (piece *Piece) GetBytes() []byte {
 	pieceBytes := []byte{}
-	for _, block := range piece.blocks {
+	for _, block := range piece.Blocks {
 		pieceBytes = append(pieceBytes, block.bytes...)
 	}
 	return pieceBytes

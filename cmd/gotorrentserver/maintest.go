@@ -72,7 +72,6 @@ func main() {
 				waitingForBlock := false
 				if !peer.PeerChoking {
 					if !waitingForBlock {
-						fmt.Printf("Sending REQUEST: piece: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, length)
 						err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
 						if err != nil {
 							panic(err)
@@ -82,6 +81,7 @@ func main() {
 					for waitingForBlock {
 						curMsg := <-msgChan
 						if curMsg.Type == message.PIECE {
+							//fmt.Printf("Block received: %s\n", curMsg.Piece)
 							err := bundle.WriteBlock(int64(curMsg.Index), int64(curMsg.Begin), curMsg.Piece)
 							if err != nil {
 								panic(err)
@@ -92,6 +92,7 @@ func main() {
 					}
 				} else {
 					fmt.Println("Peer still choking...")
+					time.Sleep(time.Second)
 				}
 				time.Sleep(100 * time.Millisecond)
 			}

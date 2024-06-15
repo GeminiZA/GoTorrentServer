@@ -16,7 +16,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
-const BUNDLE_DEBUG bool = false
+const BUNDLE_DEBUG bool = true
 
 type BundleFile struct {
 	Path string
@@ -158,9 +158,12 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 	if err != nil {
 		return err
 	}
-	if bundle.Pieces[pieceIndex].Complete() {
+	if bundle.Pieces[pieceIndex].Complete {
+		if BUNDLE_DEBUG {
+			fmt.Printf("Pieces[%d] complete... writing piece...\n", pieceIndex)
+		}
 		bundle.BitField.SetBit(pieceIndex)
-		err := bundle.WritePiece(pieceIndex)
+		err := bundle.writePiece(pieceIndex)
 		if err != nil {
 			return err
 		}
@@ -174,10 +177,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 	return err
 }
 
-func (bundle *Bundle) WritePiece(pieceIndex int64) error {
-	bundle.mux.Lock()
-	defer bundle.mux.Unlock()
-
+func (bundle *Bundle) writePiece(pieceIndex int64) error { // Only called from within bundle so no muxlock
 	curPiece := bundle.Pieces[pieceIndex]
 	bytes := curPiece.GetBytes()
 	curByte := int64(0)
@@ -262,30 +262,15 @@ func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns piec
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
 	
-	nextByte := int64(0)
-	pieceIndex := int64(0)
-	for i, b := range bundle.BitField.Bytes {
-		if b != 0xFF {
-			nextByte = int64(i)
-			break
+	for pieceIndex, piece := range bundle.Pieces {
+		byteOffset := int64(0)
+		for _, block := range piece.Blocks {
+			if !block.Written && !block.Fetching {
+				block.Fetching = true
+				return int64(pieceIndex), byteOffset, block.Length, nil
+			}
+			byteOffset += block.Length
 		}
 	}
-	for i := int64(0); i < 8; i++ {
-		if !bundle.BitField.GetBit(nextByte * 8 + i) {
-			pieceIndex = nextByte * 8 + i
-			break
-		}
-	}
-	beginOffset := int64(0)
-	curByte := int64(0)
-	for _, block := range bundle.Pieces[pieceIndex].blocks {
-		if !block.written {
-			beginOffset = curByte
-			curByte += block.length
-			break
-		}
-		curByte += block.length
-	}
-	length := curByte - beginOffset
-	return pieceIndex, beginOffset, length, nil
+	return 0, 0, 0, errors.New("no next block")
 }

@@ -121,9 +121,9 @@ func (peer *Peer) handleConn() {
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr.Timeout() {
-				if PEER_DEBUG {
-					fmt.Println("no message read")
-				}
+				//if PEER_DEBUG {
+					//fmt.Println("no message read")
+				//}
 				time.Sleep(time.Second)
 				continue
 			}

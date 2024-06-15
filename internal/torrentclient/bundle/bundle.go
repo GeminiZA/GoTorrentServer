@@ -263,6 +263,18 @@ func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns piec
 	defer bundle.mux.Unlock()
 	
 	for pieceIndex, piece := range bundle.Pieces {
+		if BUNDLE_DEBUG {
+			fmt.Printf("Looking for next Block in Piece %d\n", pieceIndex)
+			fmt.Print("Blocks: ")
+			for _, block := range piece.Blocks {
+				if block.Written || block.Fetching {
+					fmt.Print("1")
+				} else {
+					fmt.Print("0")
+				}
+			}
+			fmt.Println()
+		}
 		byteOffset := int64(0)
 		for _, block := range piece.Blocks {
 			if !block.Written && !block.Fetching {

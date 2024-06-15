@@ -46,55 +46,46 @@ func main() {
 		fmt.Printf("Trying to connect to peer (%s:%d)...\n", peerIP, peerPort)
 		msgChan := make(chan *message.Message, 100)
 		peer, err := peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), tracker.PeerID, msgChan)
-		defer peer.Close()
 		if err != nil {
 			fmt.Println("error connecting to peer")
 			fmt.Println(err)
 			continue
 		}
+		defer peer.Close()
 		fmt.Printf("Connected to peer: %s\n", peer.PeerID)
 		err = peer.SendInterested()
 		if err != nil {
 			panic(err)
 		}
-		//time.Sleep(2 * time.Second)
-		//err = peer.SendUnchoke()
-		//if err != nil {
-			//panic(err)
-		//}
-		// FOr some reason getting piece response now when not waiting between messages
-			//send request
-			for !bundle.Complete {
-				pieceIndex, beginOffset, length, err := bundle.NextBlock()
-				if err != nil {
-					panic(err)
-				}
-				waitingForBlock := false
-				if !peer.PeerChoking {
-					if !waitingForBlock {
-						err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
-						if err != nil {
-							panic(err)
-						}
-						waitingForBlock = true
+		peer.PeerChoking = true
+		for peer.PeerChoking {
+			fmt.Println("Peer choking...")
+			time.Sleep(100 * time.Millisecond)
+		}
+		for !bundle.Complete {
+			waitingForPiece := false
+			if !peer.PeerChoking {
+				if !waitingForPiece {
+					pieceIndex, beginOffset, length, err := bundle.NextBlock()
+					if err != nil {
+						panic(err)
 					}
-					for waitingForBlock {
-						curMsg := <-msgChan
-						if curMsg.Type == message.PIECE {
-							//fmt.Printf("Block received: %s\n", curMsg.Piece)
-							err := bundle.WriteBlock(int64(curMsg.Index), int64(curMsg.Begin), curMsg.Piece)
-							if err != nil {
-								panic(err)
-							}
-							waitingForBlock = false
-						}
-						curMsg = nil
+					err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
+					if err != nil {
+						panic(err)
 					}
-				} else {
-					fmt.Println("Peer still choking...")
-					time.Sleep(time.Second)
+					waitingForPiece = true
 				}
+				msg := <-msgChan
+				fmt.Println("Message got in main goroutine:")
+				msg.Print()
+				if msg.Type == message.PIECE {
+					fmt.Println("GOT PIECE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				}
+			} else {
+				fmt.Println("Peer choking...")
 				time.Sleep(100 * time.Millisecond)
 			}
+		}
 	}
 }

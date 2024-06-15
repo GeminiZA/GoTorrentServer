@@ -57,7 +57,7 @@ func (m *Message) GetBytes() []byte {
 		ret = append(ret, index...)
 		return ret
 	case BITFIELD:
-		len := uint32(1) + m.Length
+		len := uint32(1) + uint32(len(m.BitField))
 		ret := make([]byte, 4)
 		binary.BigEndian.PutUint32(ret, len)
 		ret = append(ret, 5)
@@ -186,6 +186,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		bytesRead += n
 	}
 	msgID := msgBytes[0]
+	fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
 	switch msgID {
 	case 0: // choke
 		return &Message{Type: CHOKE}, nil
@@ -238,7 +239,12 @@ func (msg *Message) Print() {
 	case HAVE:
 		fmt.Printf("{Type: have, Index: %d}\n", msg.Index)
 	case BITFIELD:
-		fmt.Printf("{Type: bitfield, field: blob}\n")
+		s := "{Type: bitfield, field: blob}\n"
+		s += "Bitfield:"
+		for _, b := range msg.BitField {
+			s += fmt.Sprintf("%08b ", b)
+		}
+		fmt.Println(s)
 	case REQUEST:
 		fmt.Printf("{Type: request, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PIECE:

@@ -7,6 +7,7 @@ import (
 
 type BitField struct {
 	Bytes []byte
+	len int
 }
 
 func LoadBytes(bytes []byte) *BitField {
@@ -20,7 +21,7 @@ func New(len int) *BitField {
 	} else {
 		byteLen = len / 8
 	}
-	bf := BitField{Bytes: []byte{}}
+	bf := BitField{Bytes: []byte{}, len: len}
 	for i := 0; i < byteLen; i++ {
 		bf.Bytes = append(bf.Bytes, 0)
 	}
@@ -31,8 +32,8 @@ func (bf *BitField) GetAll() []byte {
 	return bf.Bytes
 }
 
-func (bf *BitField) Len() int64 {
-	return int64(len(bf.Bytes)) * 8
+func (bf *BitField) Len() int {
+	return bf.len
 }
 
 func (bf *BitField) SetBit(index int64) error {

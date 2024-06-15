@@ -6,6 +6,7 @@ import (
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
@@ -43,13 +44,15 @@ func main() {
 			continue
 		}
 		fmt.Printf("Trying to connect to peer (%s:%d)...\n", peerIP, peerPort)
-		peer, err := peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), tracker.PeerID)
+		msgChan := make(chan *message.Message, 100)
+		peer, err := peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), tracker.PeerID, msgChan)
+		defer peer.Close()
 		if err != nil {
 			fmt.Println("error connecting to peer")
 			fmt.Println(err)
 			continue
 		}
-		fmt.Printf("Connected to peer: %s", peer.PeerID)
+		fmt.Printf("Connected to peer: %s\n", peer.PeerID)
 		err = peer.SendInterested()
 		if err != nil {
 			panic(err)
@@ -60,33 +63,37 @@ func main() {
 			//panic(err)
 		//}
 		// FOr some reason getting piece response now when not waiting between messages
-		for peer.PeerChoking {
-			time.Sleep(2 * time.Second)
-		}
-		pieceIndex, beginOffset, length, err := bundle.NextBlock()
-		if err != nil {
-			panic(err)
-		}
-		time.Sleep(2 * time.Second) // still responds after added 2s wait I think it's because I sent interested after connecting
-		if !peer.PeerChoking {
-			err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
-			if err != nil {
-				panic(err)
+			//send request
+			for !bundle.Complete {
+				pieceIndex, beginOffset, length, err := bundle.NextBlock()
+				if err != nil {
+					panic(err)
+				}
+				waitingForBlock := false
+				if !peer.PeerChoking {
+					if !waitingForBlock {
+						fmt.Printf("Sending REQUEST: piece: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, length)
+						err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
+						if err != nil {
+							panic(err)
+						}
+						waitingForBlock = true
+					}
+					for waitingForBlock {
+						curMsg := <-msgChan
+						if curMsg.Type == message.PIECE {
+							err := bundle.WriteBlock(int64(curMsg.Index), int64(curMsg.Begin), curMsg.Piece)
+							if err != nil {
+								panic(err)
+							}
+							waitingForBlock = false
+						}
+						curMsg = nil
+					}
+				} else {
+					fmt.Println("Peer still choking...")
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
-		}
-		pieceIndex, beginOffset, length, err = bundle.NextBlock()
-		if err != nil {
-			panic(err)
-		}
-		time.Sleep(2 * time.Second) // still responds after added 2s wait I think it's because I sent interested after connecting
-		if !peer.PeerChoking {
-			err = peer.SendRequestBlock(pieceIndex, beginOffset, length)
-			if err != nil {
-				panic(err)
-			}
-		}
-		for peer.IsConnected() {
-			time.Sleep(2 * time.Second)
-		}
 	}
 }

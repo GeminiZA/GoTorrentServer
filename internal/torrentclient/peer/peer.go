@@ -25,9 +25,10 @@ type Peer struct {
 	bitfield 		*bitfield.BitField
 	keepAlive 		bool
 	lastMsgTime		time.Time
+	msgChan			chan<-*message.Message
 }
 
-func New(infoHash []byte, numPieces int, conn net.Conn) (*Peer, error) {
+func New(infoHash []byte, numPieces int, conn net.Conn, msgChan chan<-*message.Message) (*Peer, error) {
 	peer := Peer{
 		InfoHash: infoHash,
 		Interested: false, 
@@ -44,7 +45,7 @@ func New(infoHash []byte, numPieces int, conn net.Conn) (*Peer, error) {
 	return &peer, nil
 }
 
-func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID string) (*Peer, error) {
+func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID string, msgChan chan<-*message.Message) (*Peer, error) {
 	peer := Peer{
 		InfoHash: infoHash,
 		Interested: false,
@@ -53,6 +54,7 @@ func Connect(infoHash []byte, numPieces int, ip string, port int, myPeerID strin
 		PeerInterested: false,
 		bitfield: bitfield.New(numPieces),
 		lastMsgTime: time.Now(),
+		msgChan: msgChan,
 	}
 	if PEER_DEBUG {
 		fmt.Printf("Trying to connect to peer on: %s:%d\n", ip, port)
@@ -144,6 +146,8 @@ func (peer *Peer) handleConn() {
 		case message.KEEP_ALIVE:
 			//Todo
 		}
+		peer.msgChan<-msg
+		fmt.Printf("Got message :")
 		msg.Print()
 	}
 }

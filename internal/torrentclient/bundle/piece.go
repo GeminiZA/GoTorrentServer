@@ -11,6 +11,7 @@ type Block struct {
 	length     int64
 	written    bool
 	bytes 	   []byte
+	fetching   bool
 }
 
 type Piece struct {

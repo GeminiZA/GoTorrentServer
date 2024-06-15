@@ -168,6 +168,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	}
 	msgLen := binary.BigEndian.Uint32(msgLenBytes)
 	if msgLen > MAX_MESSAGE_LENGTH {
+		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")
 	}
 	if msgLen == 0 {
@@ -241,13 +242,13 @@ func (msg *Message) Print() {
 	case REQUEST:
 		fmt.Printf("{Type: request, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PIECE:
-		fmt.Printf("{Type: piece, index: %d, begin: %d}\n", msg.Index, msg.Begin)
+		fmt.Printf("{Type: piece, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, len(msg.Piece))
 	case CANCEL:
 		fmt.Printf("{Type: cancel, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PORT:
 		fmt.Printf("{Type: port, port: %d}\n", msg.Port)
 	case HANDSHAKE:
-		fmt.Printf("Type: handshake, peerID: %s", msg.PeerID)
+		fmt.Printf("Type: handshake, peerID: %s\n", msg.PeerID)
 	}
 }
 

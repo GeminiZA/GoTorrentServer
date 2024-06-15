@@ -2,6 +2,8 @@
 // load bundle from currently active torrent;
 // read entire piece and store in LRU cache when client gets a block from it to upload;
 // write files in new
+// hash piece before writing
+// something in here hangs when writing the piece
 package bundle
 
 import (
@@ -165,6 +167,9 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 	}
 	if bundle.BitField.Complete() {
 		bundle.Complete = true
+	}
+	if BUNDLE_DEBUG {
+		fmt.Printf("Saved block: index: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, len(block))
 	}
 	return err
 }

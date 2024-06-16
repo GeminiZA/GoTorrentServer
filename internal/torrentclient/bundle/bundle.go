@@ -30,7 +30,7 @@ type Bundle struct {
 	Length      int64
 	Path string
 	Pieces []*Piece
-	NumPieces int
+	NumPieces int64
 	Files []*BundleFile
 	MultiFile bool
 	BitField *bitfield.BitField
@@ -107,7 +107,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		bundle.Pieces = append(bundle.Pieces, curPiece)
 		curByte += curPieceLength
 	}
-	bundle.NumPieces = len(bundle.Pieces)
+	bundle.NumPieces = int64(len(bundle.Pieces))
 	if BUNDLE_DEBUG {
 		fmt.Printf("Got pieces (%d)\n", bundle.NumPieces)
 		for i, piece := range bundle.Pieces {
@@ -242,23 +242,34 @@ func (bundle *Bundle) loadPiece(pieceIndex int64) error {
 	return nil
 }
 
-func (bundle *Bundle) GetBlock(pieceIndex int64, beginOffset int64, length int64) ([]byte, error) {
+func (bundle *Bundle) GetBlock(bi *BlockInfo) ([]byte, error) {
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
 	
-	if !bundle.pieceCache.Contains(pieceIndex) {
-		bundle.loadPiece(pieceIndex)
+	if !bundle.pieceCache.Contains(bi.PieceIndex) {
+		bundle.loadPiece(bi.PieceIndex)
 	}
-	pieceBytes := bundle.pieceCache.Get(pieceIndex)
+	pieceBytes := bundle.pieceCache.Get(bi.PieceIndex)
 
-	if length + beginOffset > bundle.Pieces[pieceIndex].length {
+	if bi.Length + bi.BeginOffset > bundle.Pieces[bi.PieceIndex].length {
 		return nil, errors.New("block overflows piece bounds")
 	}
 
-	return pieceBytes[beginOffset : length + beginOffset], nil
+	return pieceBytes[bi.BeginOffset : bi.Length + bi.BeginOffset], nil
 }
 
-func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns pieceIndex, beginOffset, blockLength
+func (bundle *Bundle) CancelBlock(bi *BlockInfo) error {
+	bundle.mux.Lock()
+	defer bundle.mux.Unlock()
+
+	err := bundle.Pieces[bi.PieceIndex].CancelBlock(bi.BeginOffset)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bundle *Bundle) NextBlock() (*BlockInfo, error) { // Returns pieceIndex, beginOffset, blockLength
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
 	
@@ -279,10 +290,14 @@ func (bundle *Bundle) NextBlock() (int64, int64, int64, error) { // Returns piec
 		for _, block := range piece.Blocks {
 			if !block.Written && !block.Fetching {
 				block.Fetching = true
-				return int64(pieceIndex), byteOffset, block.Length, nil
+				return &BlockInfo{PieceIndex: int64(pieceIndex), BeginOffset: byteOffset, Length: block.Length}, nil
 			}
 			byteOffset += block.Length
 		}
 	}
-	return 0, 0, 0, errors.New("no next block")
+	return nil, errors.New("no next block")
+}
+
+func (bundle *Bundle) BytesLeft() int64 {
+	return (bundle.BitField.Len() - bundle.BitField.NumSet) * bundle.PieceLength
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
 
-const DEBUG_TRACKER bool = false
+const DEBUG_TRACKER bool = true
 
 type Tracker struct {
 	instantiated bool
@@ -45,7 +45,6 @@ func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploade
 	tracker.Leechers = 0
 	tracker.instantiated = true
 	tracker.started = false
-
 	return &tracker
 }
 
@@ -143,6 +142,10 @@ func (tracker *Tracker) Start() error {
 	}
 
 	defer res.Body.Close()
+
+	if DEBUG_TRACKER {
+		fmt.Println("Got tracker response")
+	}
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {

@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
+
+const DEBUG_MESSAGE bool = false
 
 type MessageType int
 
@@ -186,7 +190,9 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		bytesRead += n
 	}
 	msgID := msgBytes[0]
-	fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
+	if DEBUG_MESSAGE {
+		fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
+	}
 	switch msgID {
 	case 0: // choke
 		return &Message{Type: CHOKE}, nil
@@ -201,7 +207,8 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		return &Message{Type: HAVE, Index: pieceIndex}, nil
 	case 5: // bitfield
 		bitField := msgBytes[5:msgLen]
-		return &Message{Type: BITFIELD, BitField: bitField}, nil
+		bitFieldLength := msgLen - 1
+		return &Message{Type: BITFIELD, BitField: bitField, Length: bitFieldLength}, nil
 	case 6: // request
 		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
 		beginOffset := binary.BigEndian.Uint32(msgBytes[5:9])
@@ -293,8 +300,8 @@ func NewBitfield(bitfield []byte) *Message {
 	return &Message{Type: BITFIELD, BitField: bitfield}
 }
 
-func NewRequest(index int64, beginOffset int64, length int64) *Message {
-	return &Message{Type: REQUEST, Index: uint32(index), Begin: uint32(beginOffset), Length: uint32(length)}
+func NewRequest(bi *bundle.BlockInfo) *Message {
+	return &Message{Type: REQUEST, Index: uint32(bi.PieceIndex), Begin: uint32(bi.BeginOffset), Length: uint32(bi.Length)}
 }
 
 func NewPiece(index uint32, beginOffset uint32, block []byte) *Message {

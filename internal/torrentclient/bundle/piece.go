@@ -8,28 +8,12 @@ import (
 	"fmt"
 )
 
-type Block struct {
-	Length     int64
-	Written    bool
-	bytes 	   []byte
-	Fetching   bool
-}
-
 type Piece struct {
 	Blocks     []*Block
 	Complete   bool
 	hash 	   []byte
 	length	   int64
 	ByteOffset int64
-}
-
-func newBlock(length int64) *Block {
-	return &Block{Length: length, Written: false, Fetching: false, bytes: nil}
-}
-
-func (block *Block) write(bytes []byte) {
-	block.bytes = bytes
-	block.Written = true
 }
 
 func NewPiece(length int64, pieceByteOffset int64, hash []byte) *Piece {
@@ -124,4 +108,16 @@ func (piece *Piece) GetBytes() []byte {
 		pieceBytes = append(pieceBytes, block.bytes...)
 	}
 	return pieceBytes
+}
+
+func (piece *Piece) CancelBlock(beginOffset int64) error {
+	curByte := int64(0)
+	for _, block := range piece.Blocks {
+		if curByte == beginOffset {
+			block.Fetching = false
+			return nil
+		}
+		curByte += block.Length
+	}
+	return errors.New("offset not found in blocks (CancelBlock)")
 }

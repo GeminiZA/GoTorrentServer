@@ -10,7 +10,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
 
-const DEBUG_MESSAGE bool = false
+const DEBUG_MESSAGE bool = true
 
 type MessageType int
 
@@ -206,7 +206,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
 		return &Message{Type: HAVE, Index: pieceIndex}, nil
 	case 5: // bitfield
-		bitField := msgBytes[5:msgLen]
+		bitField := msgBytes[1:msgLen]
 		bitFieldLength := msgLen - 1
 		return &Message{Type: BITFIELD, BitField: bitField, Length: bitFieldLength}, nil
 	case 6: // request
@@ -246,8 +246,8 @@ func (msg *Message) Print() {
 	case HAVE:
 		fmt.Printf("{Type: have, Index: %d}\n", msg.Index)
 	case BITFIELD:
-		s := "{Type: bitfield, field: blob}\n"
-		s += "Bitfield:"
+		s := fmt.Sprintf("{Type: bitfield, length: %d, field: blob}\n", msg.Length)
+		s += "Bitfield:\n"
 		for _, b := range msg.BitField {
 			s += fmt.Sprintf("%08b ", b)
 		}
@@ -297,7 +297,7 @@ func NewHave(index uint32) *Message {
 }
 
 func NewBitfield(bitfield []byte) *Message {
-	return &Message{Type: BITFIELD, BitField: bitfield}
+	return &Message{Type: BITFIELD, BitField: bitfield, Length: uint32(len(bitfield))}
 }
 
 func NewRequest(bi *bundle.BlockInfo) *Message {

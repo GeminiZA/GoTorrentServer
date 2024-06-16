@@ -30,6 +30,7 @@ type Peer struct {
 	conn				net.Conn
 	isConnected 		bool
 	bitfield 			*bitfield.BitField
+	myBitField			*bitfield.BitField
 	keepAlive 			bool
 	lastMsgSentTime		time.Time
 	lastMsgReceivedTime time.Time
@@ -45,7 +46,6 @@ func New(infoHash []byte, numPieces int64, conn net.Conn, peerID string) (*Peer,
 		AmChoked: true, 
 		PeerChoking: true, 
 		PeerInterested: false, 
-		bitfield: bitfield.New(numPieces),
 		conn: conn,
 		isConnected: true,
 		keepAlive: true,
@@ -55,19 +55,19 @@ func New(infoHash []byte, numPieces int64, conn net.Conn, peerID string) (*Peer,
 	return &peer, nil
 }
 
-func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID string, myPeerID string) (*Peer, error) {
+func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID string, myPeerID string, myBitfield *bitfield.BitField) (*Peer, error) {
 	peer := Peer{
 		InfoHash: infoHash,
 		AmInterested: false,
 		AmChoked: true,
 		PeerChoking: true,
 		PeerInterested: false,
-		bitfield: bitfield.New(numPieces),
 		lastMsgSentTime: time.Now(),
 		lastMsgReceivedTime: time.Now(),
 		PeerID: peerID,
 		IP: ip,
 		Port: port,
+		myBitField: myBitfield,
 	}
 	if PEER_DEBUG {
 		fmt.Printf("Trying to connect to peer on: %s:%d\n", ip, port)
@@ -100,19 +100,29 @@ func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID strin
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Handshake received: peerID: %s, infoHash: %s\n", replyHandshake.PeerID, string(replyHandshake.InfoHash))
+	fmt.Printf("Handshake received: peerID: %s, infoHash: %x\n", replyHandshake.PeerID, replyHandshake.InfoHash)
 	fmt.Printf("Handshake reserved: ")
 	for _, b := range replyHandshake.Reserved {
 		fmt.Printf("%08b ", b)
 	}
 	fmt.Print("\n")
 
+
+	peer.conn = conn
 	peer.lastMsgSentTime = time.Now()
 	peer.lastMsgReceivedTime = time.Now()
-	peer.conn = conn
 	peer.PeerID = replyHandshake.PeerID
 	peer.keepAlive = true
 	peer.isConnected = true
+
+	bfmsg := message.NewBitfield(peer.myBitField.Bytes)
+	fmt.Printf("My bitfield msg:")
+	bfmsg.Print()
+	err = peer.send(bfmsg)
+	if err != nil {
+		return nil, err
+	}
+
 	go peer.handleConn()
 	return &peer, nil
 }
@@ -131,11 +141,14 @@ func (peer *Peer) handleConn() {
 	for peer.isConnected {
 		if peer.keepAlive {
 			if len(peer.requestQueue) > 0 && !peer.requestQueue[0].fetching {
-				if peer.PeerChoking {
+				if !peer.AmInterested {
 					peer.send(message.NewInterested())
+					peer.AmInterested = true
 				} else {
-					peer.send(message.NewRequest(peer.requestQueue[0].info))
-					peer.requestQueue[0].fetching = true
+					if !peer.PeerChoking {
+						peer.send(message.NewRequest(peer.requestQueue[0].info))
+						peer.requestQueue[0].fetching = true
+					}
 				}
 			} else {
 				if time.Now().After(peer.lastMsgSentTime.Add(15 * time.Second)) {
@@ -179,6 +192,8 @@ func (peer *Peer) handleConn() {
 			peer.PeerInterested = false
 		case message.BITFIELD:
 			peer.bitfield = bitfield.LoadBytes(msg.BitField, int64(msg.Length))
+		case message.HAVE:
+			peer.bitfield.SetBit(int64(msg.Index))
 		case message.PIECE:
 			//Send piece to session
 			fmt.Printf("GOT BLOCK!!!! Index: %d, Offset: %d, Length: %d\n", msg.Index, msg.Begin, msg.Length)
@@ -193,6 +208,10 @@ func (peer *Peer) handleConn() {
 //Message interface
 
 func (peer *Peer) send(msg *message.Message) error {
+	if PEER_DEBUG {
+		fmt.Print("Sending message: ")
+		msg.Print()
+	}
 	_, err := peer.conn.Write(msg.GetBytes())
 	if err != nil {
 		return err
@@ -217,10 +236,17 @@ func (peer *Peer) DownloadBlock(bi *bundle.BlockInfo) error {
 }
 
 func (peer *Peer) HasPiece(pieceIndex int64) bool {
-	if peer.bitfield.Full {
-		return true
+	if peer.HasBitField() {
+		if peer.bitfield.Full {
+			return true
+		}
+		return peer.bitfield.GetBit(pieceIndex)
 	}
-	return peer.bitfield.GetBit(pieceIndex)
+	return false
+}
+
+func (peer *Peer) HasBitField() bool {
+	return peer.bitfield != nil
 }
 
 func (peer *Peer) NumPieces() int64 {

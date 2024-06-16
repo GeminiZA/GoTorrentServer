@@ -145,6 +145,7 @@ func ParseFileString(data *[]byte) (*TorrentFile, error) {
 	if len(piecesString) % 20 != 0 {
 		return nil, errors.New("pieces length not divisible by 20")
 	}
+	fmt.Printf("Pieces string length: %d\n", len(piecesString))
 	for i := 0; i < len(piecesString); i += 20 {
 		tf.Info.Pieces = append(tf.Info.Pieces, []byte(piecesString[i:i+20]))
 	}

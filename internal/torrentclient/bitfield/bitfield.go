@@ -36,7 +36,7 @@ func New(len int64) *BitField {
 	} else {
 		byteLen = len / 8
 	}
-	bf := BitField{Bytes: []byte{}, len: len}
+	bf := BitField{Bytes: []byte{}, len: len, Full: false}
 	for i := int64(0); i < byteLen; i++ {
 		bf.Bytes = append(bf.Bytes, 0)
 	}
@@ -80,7 +80,7 @@ func (bf *BitField) Complete() bool {
 
 func (bf *BitField) Print() {
 	for _, b := range bf.Bytes {
-		fmt.Printf("%08b", b)
+		fmt.Printf("%08b ", b)
 	}
 	fmt.Println()
 }

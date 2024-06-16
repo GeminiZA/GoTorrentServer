@@ -16,7 +16,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
-const BUNDLE_DEBUG bool = true
+const BUNDLE_DEBUG bool = false
 
 type BundleFile struct {
 	Path string
@@ -118,6 +118,13 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 	//bitfield
 
 	bundle.BitField = bitfield.New(bundle.NumPieces)
+
+	fmt.Println("BUNDLE================================")
+	fmt.Printf("Num pieces: %d\n", bundle.NumPieces)
+	fmt.Printf("bitfield length: %d\n", len(bundle.BitField.Bytes))
+	fmt.Print("BUNDLE BITFIELD:\n")
+	bundle.BitField.Print()
+	fmt.Println("END BUNDLE================================")
 
 	//Write files
 

@@ -115,13 +115,12 @@ func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID strin
 	peer.keepAlive = true
 	peer.isConnected = true
 
-	bfmsg := message.NewBitfield(peer.myBitField.Bytes)
-	fmt.Printf("My bitfield msg:")
-	bfmsg.Print()
-	err = peer.send(bfmsg)
-	if err != nil {
-		return nil, err
-	}
+	//bfmsg := message.NewBitfield(peer.myBitField.Bytes)
+	//fmt.Printf("bfmsgbytes: %x\n", bfmsg.GetBytes())
+	//err = peer.send(bfmsg)
+	//if err != nil {
+		//return nil, err
+	//}
 
 	go peer.handleConn()
 	return &peer, nil
@@ -174,7 +173,8 @@ func (peer *Peer) handleConn() {
 			netErr, ok := err.(net.Error)
 			if ok && netErr.Timeout() {
 				//No message read / Read timed out
-				time.Sleep(time.Second)
+				fmt.Println("No message read")
+				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 			fmt.Println("peer.handleConn error:")
@@ -208,10 +208,10 @@ func (peer *Peer) handleConn() {
 //Message interface
 
 func (peer *Peer) send(msg *message.Message) error {
-	if PEER_DEBUG {
-		fmt.Print("Sending message: ")
-		msg.Print()
-	}
+	//if PEER_DEBUG {
+		//fmt.Print("Sending message: ")
+		//msg.Print()
+	//}
 	_, err := peer.conn.Write(msg.GetBytes())
 	if err != nil {
 		return err

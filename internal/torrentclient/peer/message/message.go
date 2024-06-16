@@ -166,11 +166,17 @@ func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
 func ReadMessage(conn net.Conn) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
 	msgLenBytes := make([]byte, 4)
+
+	// NB Removing this stops all reads.... WHY?
+	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+
 	_, err := conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
 	}
 	msgLen := binary.BigEndian.Uint32(msgLenBytes)
+	fmt.Printf("Message length bytes read: %x\n", msgLenBytes)
+	fmt.Printf("Message length read: %d\n", msgLen)
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")
@@ -182,6 +188,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	bytesRead := 0
 	for bytesRead < int(msgLen) {
 		buf := make([]byte, msgLen)
+		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		n, err := conn.Read(buf)
 		if err != nil {
 			return nil, err
@@ -192,6 +199,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	msgID := msgBytes[0]
 	if DEBUG_MESSAGE {
 		fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
+		fmt.Printf("Message bytes: %x%x\n", msgLenBytes, msgBytes)
 	}
 	switch msgID {
 	case 0: // choke

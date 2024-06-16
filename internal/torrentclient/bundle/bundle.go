@@ -119,13 +119,6 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	bundle.BitField = bitfield.New(bundle.NumPieces)
 
-	fmt.Println("BUNDLE================================")
-	fmt.Printf("Num pieces: %d\n", bundle.NumPieces)
-	fmt.Printf("bitfield length: %d\n", len(bundle.BitField.Bytes))
-	fmt.Print("BUNDLE BITFIELD:\n")
-	bundle.BitField.Print()
-	fmt.Println("END BUNDLE================================")
-
 	//Write files
 
 	for _, bundleFile := range bundle.Files {

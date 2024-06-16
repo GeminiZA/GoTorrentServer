@@ -42,8 +42,6 @@ func main() {
 		panic(err)
 	}
 
-	bi.PieceIndex = 1
-
 	foundPeer := false
 
 	for _, peerDict := range tracker.Peers {
@@ -71,6 +69,8 @@ func main() {
 			time.Sleep(100 * time.Millisecond)
 		}
 
+		fmt.Println("Peer now has bitfield")
+
 		if i == 50 {
 			curPeer.Close()
 			continue
@@ -89,8 +89,6 @@ func main() {
 	defer curPeer.Close()
 
 	fmt.Printf("Found peer(%s), with piece: %d\n", curPeer.PeerID, bi.PieceIndex)
-	
-	time.Sleep(time.Second)
 	
 	err = curPeer.DownloadBlock(bi)
 	if err != nil {

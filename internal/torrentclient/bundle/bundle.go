@@ -16,7 +16,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
-const BUNDLE_DEBUG bool = false
+const BUNDLE_DEBUG bool = true
 
 type BundleFile struct {
 	Path string

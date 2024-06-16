@@ -7,6 +7,7 @@ import (
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
@@ -18,10 +19,17 @@ type Session struct {
 	tracker *tracker.Tracker
 	maxConnections int
 	running bool
+	msgChan chan<-*message.Message
 }
 
 func New(torrentFile *torrentfile.TorrentFile, bundle *bundle.Bundle, maxCon int) (*Session, error) {
-	session := Session{tf: torrentFile, peers: make([]*peer.Peer, 0), bundle: bundle, maxConnections: maxCon}
+	session := Session{
+		tf: torrentFile,
+		peers: make([]*peer.Peer, 0), 
+		bundle: bundle, 
+		maxConnections: maxCon, 
+		msgChan: make(chan *message.Message, 100),
+	}
 	return &session, nil
 }
 
@@ -48,7 +56,16 @@ func (session *Session) Start(outport int, myPeerId string) error {
 		if !ok {
 			return errors.New("peer ID not string")
 		}
-		peer, err := peer.Connect(session.tf.InfoHash, session.bundle.NumPieces, peerIP, int(peerPort), peerID, myPeerId)
+		peer, err := peer.Connect(
+			session.tf.InfoHash, 
+			session.bundle.NumPieces, 
+			peerIP, 
+			int(peerPort), 
+			peerID, 
+			myPeerId, 
+			session.bundle.BitField, 
+			session.msgChan,
+		)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				fmt.Printf("Peer (%s) timed out on connect...\n", peerID)

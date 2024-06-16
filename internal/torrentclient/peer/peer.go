@@ -37,9 +37,10 @@ type Peer struct {
 	requestQueue		[]BlockReq
 	IP					string
 	Port				int
+	msgOutChan 			chan<-*message.Message
 }
 
-func New(infoHash []byte, numPieces int64, conn net.Conn, peerID string) (*Peer, error) {
+func New(infoHash []byte, numPieces int64, conn net.Conn, peerID string, msgOutChan chan<-*message.Message) (*Peer, error) {
 	peer := Peer{
 		InfoHash: infoHash,
 		AmInterested: false, 
@@ -50,12 +51,13 @@ func New(infoHash []byte, numPieces int64, conn net.Conn, peerID string) (*Peer,
 		isConnected: true,
 		keepAlive: true,
 		PeerID: peerID,
+		msgOutChan: msgOutChan,
 	}
 	go peer.handleConn()
 	return &peer, nil
 }
 
-func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID string, myPeerID string, myBitfield *bitfield.BitField) (*Peer, error) {
+func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID string, myPeerID string, myBitfield *bitfield.BitField, msgOutChan chan<-*message.Message) (*Peer, error) {
 	peer := Peer{
 		InfoHash: infoHash,
 		AmInterested: false,
@@ -68,6 +70,7 @@ func Connect(infoHash []byte, numPieces int64, ip string, port int, peerID strin
 		IP: ip,
 		Port: port,
 		myBitField: myBitfield,
+		msgOutChan: msgOutChan,
 	}
 	if PEER_DEBUG {
 		fmt.Printf("Trying to connect to peer on: %s:%d\n", ip, port)
@@ -197,6 +200,7 @@ func (peer *Peer) handleConn() {
 		case message.PIECE:
 			//Send piece to session
 			fmt.Printf("GOT BLOCK!!!! Index: %d, Offset: %d, Length: %d\n", msg.Index, msg.Begin, msg.Length)
+			peer.msgOutChan<-msg
 			peer.requestQueue = peer.requestQueue[1:]
 		}
 		peer.lastMsgReceivedTime = time.Now()

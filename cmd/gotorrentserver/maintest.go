@@ -6,6 +6,7 @@ import (
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
@@ -44,6 +45,8 @@ func main() {
 
 	foundPeer := false
 
+	msgChan := make(chan *message.Message, 100)
+
 	for _, peerDict := range tracker.Peers {
 		peerIP, ok := peerDict["ip"].(string)
 		if !ok {
@@ -57,7 +60,7 @@ func main() {
 		if !ok {
 			panic("peer id not string")
 		}
-		curPeer, err = peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), peerID, myPeerId, bundle.BitField)
+		curPeer, err = peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), peerID, myPeerId, bundle.BitField, msgChan)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -93,6 +96,38 @@ func main() {
 	err = curPeer.DownloadBlock(bi)
 	if err != nil {
 		panic(err)
+	}
+
+	pieceMsg := <-msgChan
+
+	fmt.Print("Got message in main thread: ")
+	pieceMsg.Print()
+	if pieceMsg.Type == message.PIECE {
+		err = bundle.WriteBlock(int64(pieceMsg.Index), int64(pieceMsg.Begin), pieceMsg.Piece)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	bi, err = bundle.NextBlock()
+	if err != nil {
+		panic(err)
+	}
+
+	err = curPeer.DownloadBlock(bi)
+	if err != nil {
+		panic(err)
+	}
+
+	pieceMsg = <-msgChan
+
+	fmt.Print("Got message in main thread: ")
+	pieceMsg.Print()
+	if pieceMsg.Type == message.PIECE {
+		err = bundle.WriteBlock(int64(pieceMsg.Index), int64(pieceMsg.Begin), pieceMsg.Piece)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	time.Sleep(30 * time.Second)

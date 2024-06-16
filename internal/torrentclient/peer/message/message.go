@@ -12,6 +12,8 @@ import (
 
 const DEBUG_MESSAGE bool = true
 
+const READ_TIMEOUT_MS = 1000
+
 type MessageType int
 
 const (
@@ -167,8 +169,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
 	msgLenBytes := make([]byte, 4)
 
-	// NB Removing this stops all reads.... WHY?
-	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT_MS * time.Millisecond))
 
 	_, err := conn.Read(msgLenBytes)
 	if err != nil {
@@ -188,7 +189,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	bytesRead := 0
 	for bytesRead < int(msgLen) {
 		buf := make([]byte, msgLen)
-		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT_MS * time.Millisecond))
 		n, err := conn.Read(buf)
 		if err != nil {
 			return nil, err

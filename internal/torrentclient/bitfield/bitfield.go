@@ -78,6 +78,21 @@ func (bf *BitField) Complete() bool {
 	return true
 }
 
+func (bfA *BitField) And(bfB *BitField) *BitField {
+	len := min(bfA.len, bfB.len)
+	var byteLen int64
+	if len % 8 != 0 {
+		byteLen = (len / 8) + 1
+	} else {
+		byteLen = len / 8
+	}
+	bytes := make([]byte, byteLen)
+	for i := range bytes {
+		bytes[i] = bfA.Bytes[i] & bfB.Bytes[i]
+	}
+	return LoadBytes(bytes, len)
+}
+
 func (bf *BitField) Print() {
 	for _, b := range bf.Bytes {
 		fmt.Printf("%08b ", b)

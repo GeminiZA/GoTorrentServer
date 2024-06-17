@@ -26,6 +26,7 @@ type BundleFile struct {
 
 type Bundle struct {
 	Name string
+	InfoHash []byte
 	PieceLength int64
 	Length      int64
 	Path string
@@ -46,6 +47,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		Complete: false, 
 		Path: bundlePath,
 		pieceCache: NewPieceCache(pieceCacheCapacity),
+		InfoHash: metaData.InfoHash,
 	}
 	totalLength := int64(0)
 	//Files
@@ -300,4 +302,9 @@ func (bundle *Bundle) NextBlock() (*BlockInfo, error) { // Returns pieceIndex, b
 
 func (bundle *Bundle) BytesLeft() int64 {
 	return (bundle.BitField.Len() - bundle.BitField.NumSet) * bundle.PieceLength
+}
+
+func (bundle *Bundle) PrintStatus() {
+	fmt.Printf("Bundle status: \n")
+	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.BitField.NumSet, bundle.NumPieces)
 }

@@ -10,9 +10,9 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
 
-const DEBUG_MESSAGE bool = true
+const DEBUG_MESSAGE bool = false
 
-const READ_TIMEOUT_MS = 1000
+const READ_TIMEOUT_MS = 500
 
 type MessageType int
 
@@ -169,7 +169,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
 	msgLenBytes := make([]byte, 4)
 
-	conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT_MS * time.Millisecond))
+	conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
 
 	_, err := conn.Read(msgLenBytes)
 	if err != nil {

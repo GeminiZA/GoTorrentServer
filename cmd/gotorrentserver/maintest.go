@@ -5,10 +5,8 @@ import (
 	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
 
 func main() {
@@ -29,106 +27,15 @@ func main() {
 	fmt.Println("Bundle created")
 	myPeerId := "-AZ2060-6wfG2wk6wWLc"
 	
-	tracker := tracker.New(tf.Announce, tf.InfoHash, 6881, 0, 0, bundle.BytesLeft(), myPeerId)
-	err = tracker.Start()
+	session, err := session.New(tf, bundle, 1, 1, myPeerId, 6881)
 	if err != nil {
 		panic(err)
 	}
-	defer tracker.Stop()
-
-	var curPeer *peer.Peer
-
-	bi, err := bundle.NextBlock()
+	err = session.Start()
 	if err != nil {
 		panic(err)
 	}
-
-	foundPeer := false
-
-	msgChan := make(chan *message.Message, 100)
-
-	for _, peerDict := range tracker.Peers {
-		peerIP, ok := peerDict["ip"].(string)
-		if !ok {
-			panic("peer ip not string")
-		}
-		peerPort, ok := peerDict["port"].(int64)
-		if !ok {
-			panic("peer port not int64")
-		}
-		peerID, ok := peerDict["peer id"].(string)
-		if !ok {
-			panic("peer id not string")
-		}
-		curPeer, err = peer.Connect(tf.InfoHash, bundle.NumPieces, peerIP, int(peerPort), peerID, myPeerId, bundle.BitField, msgChan)
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		i := 0
-		for !curPeer.HasBitField() && i < 50 {
-			i++
-			time.Sleep(100 * time.Millisecond)
-		}
-
-		fmt.Println("Peer now has bitfield")
-
-		if i == 50 {
-			curPeer.Close()
-			continue
-		}
-
-		if curPeer.HasPiece(bi.PieceIndex) {
-			foundPeer = true
-			break
-		}
-	}
-
-	if !foundPeer {
-		panic("no peer found with piece")
-	}
-
-	defer curPeer.Close()
-
-	fmt.Printf("Found peer(%s), with piece: %d\n", curPeer.PeerID, bi.PieceIndex)
-	
-	err = curPeer.DownloadBlock(bi)
-	if err != nil {
-		panic(err)
-	}
-
-	pieceMsg := <-msgChan
-
-	fmt.Print("Got message in main thread: ")
-	pieceMsg.Print()
-	if pieceMsg.Type == message.PIECE {
-		err = bundle.WriteBlock(int64(pieceMsg.Index), int64(pieceMsg.Begin), pieceMsg.Piece)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	bi, err = bundle.NextBlock()
-	if err != nil {
-		panic(err)
-	}
-
-	err = curPeer.DownloadBlock(bi)
-	if err != nil {
-		panic(err)
-	}
-
-	pieceMsg = <-msgChan
-
-	fmt.Print("Got message in main thread: ")
-	pieceMsg.Print()
-	if pieceMsg.Type == message.PIECE {
-		err = bundle.WriteBlock(int64(pieceMsg.Index), int64(pieceMsg.Begin), pieceMsg.Piece)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	time.Sleep(30 * time.Second)
+	defer session.Close()
+	session.PrintStatus()
+	time.Sleep(60 * time.Second)
 }

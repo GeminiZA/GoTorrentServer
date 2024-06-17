@@ -176,8 +176,10 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		return nil, err
 	}
 	msgLen := binary.BigEndian.Uint32(msgLenBytes)
-	fmt.Printf("Message length bytes read: %x\n", msgLenBytes)
-	fmt.Printf("Message length read: %d\n", msgLen)
+	if DEBUG_MESSAGE {
+		fmt.Printf("Message length bytes read: %x\n", msgLenBytes)
+		fmt.Printf("Message length read: %d\n", msgLen)
+	}
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")

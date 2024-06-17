@@ -159,14 +159,16 @@ func (peer *Peer) handleConn() {
 			default:
 				//No message to send
 			}
-			if len(peer.requestQueue) > 0 && !peer.requestQueue[0].fetching {
-				if !peer.AmInterested {
-					peer.send(message.NewInterested())
-					peer.AmInterested = true
-				} else {
-					if !peer.PeerChoking {
-						peer.send(message.NewRequest(peer.requestQueue[0].info))
-						peer.requestQueue[0].fetching = true
+			if len(peer.requestQueue) > 0 {
+				if !peer.requestQueue[0].fetching {
+					if !peer.AmInterested {
+						peer.send(message.NewInterested())
+						peer.AmInterested = true
+					} else {
+						if !peer.PeerChoking {
+							peer.send(message.NewRequest(peer.requestQueue[0].info))
+							peer.requestQueue[0].fetching = true
+						}
 					}
 				}
 			} else {

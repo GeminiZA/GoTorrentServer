@@ -27,7 +27,7 @@ func main() {
 	fmt.Println("Bundle created")
 	myPeerId := "-AZ2060-6wfG2wk6wWLc"
 	
-	session, err := session.New(tf, bundle, 1, 1, myPeerId, 6881)
+	session, err := session.New(tf, bundle, 1, 2, myPeerId, 6881)
 	if err != nil {
 		panic(err)
 	}
@@ -37,5 +37,12 @@ func main() {
 	}
 	defer session.Close()
 	session.PrintStatus()
-	time.Sleep(60 * time.Second)
+	for !bundle.Complete {
+		time.Sleep(5 * time.Second)
+		fmt.Println("===================================================")
+		fmt.Println("===================================================")
+		session.PrintStatus()
+		fmt.Println("===================================================")
+		fmt.Println("===================================================")
+	}
 }

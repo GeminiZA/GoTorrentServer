@@ -77,7 +77,9 @@ func (session *Session) ConnectPeer(peerIP string, peerPort int, peerID string) 
 	}
 	peer.Seeding = session.seeding
 	session.peerConnectChan<-peer
-	fmt.Printf("Session added peer to channel: %s\n", peer.PeerID)
+	if DEBUG_SESSION {
+		fmt.Printf("Session added peer to channel: %s\n", peer.PeerID)
+	}
 }
 
 func (session *Session) Start() error {
@@ -103,7 +105,9 @@ func (session *Session) TestBlock() {
 		}
 		for _, peer := range session.peers {
 			if peer.IsConnected() && peer.HasPiece(bi.PieceIndex) {
-				fmt.Printf("Added block req to %s\n", peer.PeerID)
+				if DEBUG_SESSION {
+					fmt.Printf("Added block req to %s\n", peer.PeerID)
+				}
 				peer.DownloadBlock(bi)
 				break
 			}
@@ -130,6 +134,8 @@ func (session *Session) runSession() {
 
 		// Add new peer connections
 		if session.curConnections < session.maxConnections {
+			fmt.Println("Looking for more peers...\nCurrent Peers:")
+			session.PrintPeers()
 			for _, peerDict := range session.tracker.Peers {
 				if session.curConnections == session.maxConnections {
 					break
@@ -145,9 +151,6 @@ func (session *Session) runSession() {
 				go session.ConnectPeer(peerIP, int(peerPort), peerID)
 			}
 		}
-
-		session.PrintPeers()
-
 		//Handle disconnected peers
 		for i := range session.peers {
 			if !session.peers[i].IsConnected() {
@@ -202,18 +205,20 @@ func (session *Session) runSession() {
 		// Handle peer messages
 		for _, peer := range session.peers {
 			// Send requests to peer
-			if peer.IsConnected() && !peer.PeerChoking {
+			if peer.IsConnected() {
 				for i, br := range session.pendingBlocks {
-					if DEBUG_SESSION {
-						fmt.Printf("Checking for req[%d]: Fetching: %t, Failed: %t, Fetched: %t\n", i, br.fetching, br.failed, br.fetched)
-					}
+					//if DEBUG_SESSION {
+						//fmt.Printf("Checking for req[%d]: Fetching: %t, Failed: %t, Fetched: %t\n", i, br.fetching, br.failed, br.fetched)
+					//}
 					if session.pendingBlocks[i].fetching {
 						if time.Now().After(session.pendingBlocks[i].timeRequested.Add(10 * time.Second)) {
 							session.pendingBlocks[i].failed = true
 						}
 						continue
 					}
-					fmt.Printf("Added block req (Piece: %d, offSet: %d) to %s\n", br.info.PieceIndex, br.info.BeginOffset, peer.PeerID)
+					if DEBUG_SESSION {
+						fmt.Printf("Added block req (Piece: %d, offSet: %d) to %s\n", br.info.PieceIndex, br.info.BeginOffset, peer.PeerID)
+					}
 					peer.DownloadBlock(session.pendingBlocks[i].info)
 					session.pendingBlocks[i].fetching = true
 					break
@@ -229,12 +234,14 @@ func (session *Session) runSession() {
 				}
 				switch msg.Type {
 				case message.PIECE:
+					found := false
 					for i, br := range session.pendingBlocks {
-						if br.fetched || !br.fetching || br.failed {
+						if !br.fetching || br.failed {
 							continue
 						}
 						//Check if block is in pending requests before writing
 						if msg.Index == uint32(br.info.PieceIndex) && msg.Begin == uint32(br.info.BeginOffset) && uint32(len(msg.Piece)) == uint32(br.info.Length) {
+							found = true
 							err := session.bundle.WriteBlock(int64(msg.Index), int64(msg.Begin), msg.Piece)
 							if err != nil {
 								fmt.Println("Error writing block, ", err)
@@ -242,15 +249,14 @@ func (session *Session) runSession() {
 							}
 							session.pendingBlocks[i].fetching = false
 							session.pendingBlocks[i].fetched = true
-						} else {
-							if DEBUG_SESSION {
-								fmt.Printf("Piece message not in pending: ")
-								msg.Print()
-								fmt.Println("Pending:")
-								for _, br := range session.pendingBlocks {
-									fmt.Printf("Piece Index: %d, Offset: %d, Length: %d\n", br.info.PieceIndex, br.info.BeginOffset, br.info.Length)
-								}
-							}
+						}
+					}
+					if DEBUG_SESSION && !found {
+						fmt.Printf("Piece message not in pending: ")
+						msg.Print()
+						fmt.Println("Pending:")
+						for _, br := range session.pendingBlocks {
+							fmt.Printf("Piece Index: %d, Offset: %d, Length: %d, Fetching: %t, Fetched: %t, Failed: %t\n", br.info.PieceIndex, br.info.BeginOffset, br.info.Length, br.fetching, br.fetched, br.failed)
 						}
 					}
 				case message.REQUEST:
@@ -269,7 +275,9 @@ func (session *Session) runSession() {
 				// No messages wait 10 ms
 				time.Sleep(10 * time.Millisecond)
 			}
+
 		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 }

@@ -60,6 +60,7 @@ func (bf *BitField) SetBit(index int64) error {
 	bitIndex := index % 8
 	bf.Bytes[byteIndex] = bf.Bytes[byteIndex] | (1 << (7 - bitIndex))
 	bf.NumSet++
+	fmt.Printf("Set bit: %d\n", index)
 	return nil
 }
 

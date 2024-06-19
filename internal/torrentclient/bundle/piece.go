@@ -78,17 +78,6 @@ func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
 	return nil
 }
 
-func (piece *Piece) IsBlockWritten(beginOffset int64) bool {
-	curOffset := int64(0)
-	for _, block := range piece.Blocks {
-		if curOffset == beginOffset {
-			return block.Written
-		}
-		curOffset += block.Length
-	}
-	return true
-}
-
 func (piece *Piece) checkHash() (bool, error) {
 	hasher := sha1.New()
 	for _, block := range piece.Blocks {

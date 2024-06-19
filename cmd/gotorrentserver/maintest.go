@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
@@ -26,23 +24,6 @@ func main() {
 	bundle.BitField.Print()
 	fmt.Println("Bundle created")
 	myPeerId := "-AZ2060-6wfG2wk6wWLc"
-	
-	session, err := session.New(tf, bundle, 1, 2, myPeerId, 6881)
-	if err != nil {
-		panic(err)
-	}
-	err = session.Start()
-	if err != nil {
-		panic(err)
-	}
-	defer session.Close()
-	session.PrintStatus()
-	for !bundle.Complete {
-		time.Sleep(5 * time.Second)
-		fmt.Println("===================================================")
-		fmt.Println("===================================================")
-		session.PrintStatus()
-		fmt.Println("===================================================")
-		fmt.Println("===================================================")
-	}
+
+	fmt.Printf("My peerID: %s\n", myPeerId)
 }

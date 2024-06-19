@@ -1,3 +1,7 @@
+// TODO:
+// Complete handshake and find session for infohash
+// Implement ICE and UPnP
+
 package listenport
 
 import (

@@ -271,31 +271,29 @@ func (bundle *Bundle) CancelBlock(bi *BlockInfo) error {
 	return nil
 }
 
-func (bundle *Bundle) NextBlock() (*BlockInfo, error) { // Returns pieceIndex, beginOffset, blockLength
+func (bundle *Bundle) NextBlock(pieceIndex int64) (*BlockInfo, error) { // Returns pieceIndex, beginOffset, blockLength
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
 	
-	for pieceIndex, piece := range bundle.Pieces {
-		if BUNDLE_DEBUG {
-			fmt.Printf("Looking for next Block in Piece %d\n", pieceIndex)
-			fmt.Print("Blocks: ")
-			for _, block := range piece.Blocks {
-				if block.Written || block.Fetching {
-					fmt.Print("1")
-				} else {
-					fmt.Print("0")
-				}
+	if BUNDLE_DEBUG {
+		fmt.Printf("Looking for next Block in Piece %d\n", pieceIndex)
+		fmt.Print("Blocks: ")
+		for _, block := range bundle.Pieces[pieceIndex].Blocks {
+			if block.Written || block.Fetching {
+				fmt.Print("1")
+			} else {
+				fmt.Print("0")
 			}
-			fmt.Println()
 		}
-		byteOffset := int64(0)
-		for _, block := range piece.Blocks {
-			if !block.Written && !block.Fetching {
-				block.Fetching = true
-				return &BlockInfo{PieceIndex: int64(pieceIndex), BeginOffset: byteOffset, Length: block.Length}, nil
-			}
-			byteOffset += block.Length
+		fmt.Println()
+	}
+	byteOffset := int64(0)
+	for _, block := range bundle.Pieces[pieceIndex].Blocks {
+		if !block.Written && !block.Fetching {
+			block.Fetching = true
+			return &BlockInfo{PieceIndex: int64(pieceIndex), BeginOffset: byteOffset, Length: block.Length}, nil
 		}
+		byteOffset += block.Length
 	}
 	return nil, errors.New("no next block")
 }

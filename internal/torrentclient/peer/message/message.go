@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
@@ -153,33 +152,9 @@ func ParseHandshake(msgBytes []byte) (*Message, error) {
 }
 
 
-func ParseMessage(msgBytes []byte) (*Message, error) {
-	const MAX_MESSAGE_LENGTH = 17 * 1024
-	msgLen := binary.BigEndian.Uint32(msgBytes[0:4])
-	if msgLen > MAX_MESSAGE_LENGTH {
-		fmt.Printf("Message too long: %d", msgLen)
-		return nil, errors.New("message exceeds max length")
-	}
-	if msgLen == 0 {
-		return &Message{Type: KEEP_ALIVE}, nil
-	}
-	msgBytes := make([]byte, 0)
-	bytesRead := 0
-	for bytesRead < int(msgLen) {
-		buf := make([]byte, msgLen)
-		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT_MS * time.Millisecond))
-		n, err := conn.Read(buf)
-		if err != nil {
-			return nil, err
-		}
-		msgBytes = append(msgBytes, buf[:n]...)
-		bytesRead += n
-	}
+func ParseMessage(msgBytes []byte) (*Message, error) { // Doesnt get msg length
+	msgLen := uint32(len(msgBytes))
 	msgID := msgBytes[0]
-	if DEBUG_MESSAGE {
-		fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
-		fmt.Printf("Message bytes: %x%x\n", msgLenBytes, msgBytes)
-	}
 	switch msgID {
 	case 0: // choke
 		return &Message{Type: CHOKE}, nil

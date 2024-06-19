@@ -12,8 +12,12 @@ type BitField struct {
 	NumSet int64
 }
 
-func LoadBytes(bytes []byte, len int64) *BitField {
-	bf := BitField{Bytes: bytes, len: len}
+func LoadBytes(bytes []byte, length int64) *BitField {
+	newBytes := bytes
+	for len(newBytes) < int(length) {
+		newBytes = append(newBytes, 0)
+	}
+	bf := BitField{Bytes: newBytes, len: length}
 	bf.Full = bf.Complete()
 	for _, b := range bytes { //Count on bits
 		if b == 0xFF {
@@ -92,6 +96,24 @@ func (bfA *BitField) And(bfB *BitField) *BitField {
 		bytes[i] = bfA.Bytes[i] & bfB.Bytes[i]
 	}
 	return LoadBytes(bytes, len)
+}
+
+func (bfA *BitField) Not() *BitField {
+	bytes := make([]byte, len(bfA.Bytes))
+	bytesToFlip := bfA.len / 8
+	bitsToFlip := bfA.len % 8
+	i := int64(0)
+	for i < bytesToFlip {
+		bytes[i] = ^bfA.Bytes[i]
+		i++
+	}
+	ret := LoadBytes(bytes, bfA.len)
+	for j := int64(0); j < bitsToFlip; j++ {
+		if bfA.GetBit(i*8+j) {
+			ret.SetBit(i*8+j)
+		}
+	}
+	return ret
 }
 
 func (bfA *BitField) NotAANDB(bfB *BitField) *BitField {

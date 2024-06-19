@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
@@ -134,52 +133,29 @@ func (m *Message) GetBytes() []byte {
 	return nil
 }
 
-func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
-	msg := Message{Type: HANDSHAKE}
-	deadline := time.Now().Add(timeout)
-	pstrlenBytes := make([]byte, 1)
-	err := conn.SetReadDeadline(deadline)
-	if err != nil {
-		return nil, err
+func ParseHandshake(msgBytes []byte) (*Message, error) {
+	if len(msgBytes) != 68 {
+		return nil, errors.New("handshake not 68 bytes")
 	}
-	_, err = conn.Read(pstrlenBytes)
-	if err != nil {
-		return nil, err
-	}
-	pstrlen := pstrlenBytes[0]
+	pstrlen := msgBytes[0]
 	if pstrlen != 19 {
 		return nil, errors.New("invalid protocol string")
 	}
-	restLen := pstrlen + 48 // reserved (8) infohash (20) peerID (20)
-	rest := make([]byte, restLen) 
-	_, err = conn.Read(rest)
-	if err != nil {
-		return nil, err
-	}
-	if string(rest[0:pstrlen]) != "BitTorrent protocol" {
+	pstr := string(msgBytes[1:pstrlen+1])
+	if pstr != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
-	msg.Reserved = rest[pstrlen : pstrlen + 8]
-	msg.InfoHash = rest[pstrlen + 8:pstrlen + 28]
-	msg.PeerID = string(rest[pstrlen + 28: pstrlen + 48])
+	msg := Message{Type: HANDSHAKE}
+	msg.Reserved = msgBytes[20:28]
+	msg.InfoHash = msgBytes[28:48]
+	msg.PeerID = string(msgBytes[48:68])
 	return &msg, nil
 }
 
-func ReadMessage(conn net.Conn) (*Message, error) {
+
+func ParseMessage(msgBytes []byte) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
-	msgLenBytes := make([]byte, 4)
-
-	conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-
-	_, err := conn.Read(msgLenBytes)
-	if err != nil {
-		return nil, err
-	}
-	msgLen := binary.BigEndian.Uint32(msgLenBytes)
-	if DEBUG_MESSAGE {
-		fmt.Printf("Message length bytes read: %x\n", msgLenBytes)
-		fmt.Printf("Message length read: %d\n", msgLen)
-	}
+	msgLen := binary.BigEndian.Uint32(msgBytes[0:4])
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")

@@ -121,6 +121,7 @@ func (session *Session) PrintPeers() {
 	}
 }
 
+
 func (session *Session) runSession() {
 	for session.running {
 		// Handle new peer connections

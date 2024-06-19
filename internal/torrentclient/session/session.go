@@ -26,6 +26,7 @@ type Session struct {
 	tf 				 *torrentfile.TorrentFile
 	peers 			 []*peer.Peer
 	curPeerIDs		 map[string]struct{}
+	bannedPeerIDs	 map[string]struct{}
 	bundle 			 *bundle.Bundle
 	tracker 		 *tracker.Tracker
 	myPeerID		 string
@@ -44,6 +45,7 @@ func New(torrentFile *torrentfile.TorrentFile, bundle *bundle.Bundle, maxCon int
 		tf: torrentFile,
 		peers: make([]*peer.Peer, 0), 
 		curPeerIDs: make(map[string]struct{}),
+		bannedPeerIDs: make(map[string]struct{}),
 		bundle: bundle, 
 		myPeerID: myPeerID,
 		outport: outport,
@@ -97,24 +99,6 @@ func (session *Session) Start() error {
 	return nil
 }
 
-func (session *Session) TestBlock() {
-	if session.running {
-		bi, err := session.bundle.NextBlock()
-		if err != nil {
-			panic(err)
-		}
-		for _, peer := range session.peers {
-			if peer.IsConnected() && peer.HasPiece(bi.PieceIndex) {
-				if DEBUG_SESSION {
-					fmt.Printf("Added block req to %s\n", peer.PeerID)
-				}
-				peer.DownloadBlock(bi)
-				break
-			}
-		}
-	}
-}
-
 func (session *Session) PrintPeers() {
 	for _, peer := range session.peers {
 		fmt.Printf("Peer (%s)\tConnected: %t\tIP: %s\tPort:%d\n", peer.PeerID, peer.IsConnected(), peer.IP, peer.Port)
@@ -158,6 +142,7 @@ func (session *Session) runSession() {
 				session.peers = session.peers[:len(session.peers) - 1]
 			}
 		}
+
 
 		// Set if seeding
 		if session.bundle.Complete {

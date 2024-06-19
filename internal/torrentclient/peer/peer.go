@@ -15,9 +15,10 @@ import (
 const PEER_DEBUG bool = true
 const HANDSHAKE_REPLY_TIMEOUT_MS = 3000
 
-type BlockReq struct {
+type BlockRequest struct {
 	info *bundle.BlockInfo
 	fetching bool
+	timeRequested time.Time
 }
 
 type Peer struct {
@@ -34,11 +35,12 @@ type Peer struct {
 	keepAlive 			bool
 	lastMsgSentTime		time.Time
 	lastMsgReceivedTime time.Time
-	requestQueue		[]BlockReq
+	requestQueue		[]*BlockRequest
 	IP					string
 	Port				int
 	MsgOutChan 			chan *message.Message
 	MsgInChan			chan *message.Message
+	reqTimedChan		chan *BlockRequest
 	Seeding				bool
 }
 
@@ -148,46 +150,54 @@ func (peer *Peer) IsConnected() bool {
 func (peer *Peer) handleConn() {
 	for peer.isConnected {
 		if peer.keepAlive {
-			select {
-			case msg := <-peer.MsgOutChan:
-				peer.send(msg)
-				if msg.Type == message.PIECE {
-					if !peer.Seeding {
-						peer.sendChoke()
-					}
+			//Send queued messages
+			bMoreMsgsOut := true
+			for bMoreMsgsOut {
+				select {
+				case msg := <-peer.MsgOutChan:
+					peer.send(msg)
+				default:
+					bMoreMsgsOut = false
 				}
-			default:
-				//No message to send
 			}
+			
+			//Check for timed requests
+			i := 0
+			for i < len(peer.requestQueue) {
+				if time.Now().After(peer.requestQueue[i].timeRequested.Add(5 * time.Second)) {
+					peer.reqTimedChan <- peer.requestQueue[i]
+					peer.requestQueue = append(peer.requestQueue[:i], peer.requestQueue[i+1:]...)
+				} else {
+					i++
+				}
+			}
+			
+			//Send queued requests
 			if len(peer.requestQueue) > 0 {
-				if !peer.requestQueue[0].fetching {
-					if !peer.AmInterested {
-						peer.send(message.NewInterested())
-						peer.AmInterested = true
-					} else {
-						if !peer.PeerChoking {
-							peer.send(message.NewRequest(peer.requestQueue[0].info))
-							peer.requestQueue[0].fetching = true
+				if !peer.PeerChoking {
+					for _, req := range peer.requestQueue {
+						if req.fetching {
+							continue
+						}
+						err := peer.send(message.NewRequest(req.info))
+						if err != nil {
+							fmt.Println("Error sending request: ", err)
 						}
 					}
 				}
-			} else {
-				if peer.AmInterested {
-					peer.SendNotInterested()
-				} else {
-					if time.Now().After(peer.lastMsgSentTime.Add(15 * time.Second)) {
-						err := peer.send(message.NewKeepAlive())
-						if err != nil {
-							fmt.Printf("Keep alive error: %e", err)
-							peer.Close()
-							break
-						}
-					}
-					if time.Now().After(peer.lastMsgReceivedTime.Add(30 * time.Second)) {
-						fmt.Println("Peer not alive any more... Killing")
+			} else { //  Send keep alive
+				if time.Now().After(peer.lastMsgSentTime.Add(20 * time.Second)) {
+					err := peer.send(message.NewKeepAlive())
+					if err != nil {
+						fmt.Printf("Keep alive error: %e", err)
 						peer.Close()
 						break
 					}
+				}
+				if time.Now().After(peer.lastMsgReceivedTime.Add(30 * time.Second)) {
+					fmt.Println("Peer not alive any more... Killing")
+					peer.Close()
+					break
 				}
 			}
 		}
@@ -267,7 +277,7 @@ func (peer *Peer) DownloadBlock(bi *bundle.BlockInfo) error {
 	if !peer.HasPiece(bi.PieceIndex) {
 		return errors.New("peer doesn't have piece")
 	}
-	peer.requestQueue = append(peer.requestQueue, BlockReq{info: bi, fetching: false})
+	peer.requestQueue = append(peer.requestQueue, &BlockRequest{info: bi, fetching: false})
 	if PEER_DEBUG {
 		fmt.Printf("Added req to queue on peer(%s)\n", string(peer.PeerID))
 	}
@@ -291,6 +301,7 @@ func (peer *Peer) SendNotInterested() error {
 		return err
 	}
 	peer.AmInterested = false
+	peer.requestQueue = make([]*BlockRequest, 0)
 	return nil
 }
 
@@ -311,6 +322,28 @@ func (peer *Peer) sendUnchoke() error {
 		return err
 	}
 	peer.AmChoking = true
+	return nil
+}
+
+func (peer *Peer) SendCancel(bi *bundle.BlockInfo) error {
+	i := 0
+	found := false
+	for i < len(peer.requestQueue) {
+		if peer.requestQueue[i].info.PieceIndex == bi.PieceIndex && peer.requestQueue[i].info.BeginOffset == bi.BeginOffset {
+			peer.requestQueue = append(peer.requestQueue[:i], peer.requestQueue[i+1:]...)
+			found = true
+			break
+		}
+		i++
+	}
+	if !found {
+		return nil
+	}
+	msg := message.NewCancel(uint32(bi.PieceIndex), uint32(bi.BeginOffset), uint32(bi.Length))
+	err := peer.send(msg)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

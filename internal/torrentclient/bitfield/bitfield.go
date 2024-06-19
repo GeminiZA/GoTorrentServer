@@ -7,12 +7,12 @@ import (
 
 type BitField struct {
 	Bytes []byte
-	len int64
+	len uint32
 	Full bool
-	NumSet int64
+	NumSet uint32
 }
 
-func LoadBytes(bytes []byte, len int64) *BitField {
+func LoadBytes(bytes []byte, len uint32) *BitField {
 	bf := BitField{Bytes: bytes, len: len}
 	bf.Full = bf.Complete()
 	for _, b := range bytes { //Count on bits
@@ -29,8 +29,8 @@ func LoadBytes(bytes []byte, len int64) *BitField {
 	return &bf
 }
 
-func New(len int64) *BitField {
-	var byteLen int64
+func New(len uint32) *BitField {
+	var byteLen uint32
 	if len % 8 != 0 {
 		byteLen = (len / 8) + 1
 	} else {

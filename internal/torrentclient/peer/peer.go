@@ -74,6 +74,15 @@ type Peer struct {
 	responseInQueue 		[]BlockResponse
 	responseOutQueue 		[]BlockResponse
 	requestCancelledQueue 	[]BlockRequest
+	//Rate
+	totalBytesUploaded 		int64
+	totalBytesDownloaded	int64
+	bytesDownloaded			int64
+	bytesUploaded			int64
+	DownloadRate			float64
+	UploadRate				float64
+	lastDownloadUpdate 		time.Time
+	lastUploadUpdate 		time.Time
 }
 
 
@@ -92,7 +101,31 @@ func Connect(
 		remotePeerID: remotePeerID,
 		infoHash: infohash,
 		bitField: bitfield,
+		remoteBitField: nil,
 		numPieces: numPieces,
+		timeLastReceived: time.Now(),
+		timeLastSent: time.Now(),
+		Connected: false,
+		Keepalive: false,
+		amInterested: false,
+		amChoking: true,
+		remoteInterested: false,
+		remoteChoking: true,
+		// Queues
+		requestInQueue: make([]BlockRequest, 0),
+		requestOutQueue: make([]BlockRequest, 0),
+		responseOutQueue: make([]BlockResponse, 0),
+		responseInQueue: make([]BlockResponse, 0),
+		requestCancelledQueue: make([]BlockRequest, 0),
+		// Rates
+		lastDownloadUpdate: time.Now(),
+		lastUploadUpdate: time.Now(),
+		bytesUploaded: 0,
+		bytesDownloaded: 0,
+		totalBytesUploaded: 0,
+		totalBytesDownloaded: 0,
+		DownloadRate: 0,
+		UploadRate: 0,
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", remoteIP, remotePort))
@@ -124,360 +157,6 @@ func (peer *Peer) Close() {
 	peer.Keepalive = false
 	peer.Connected = false
 	peer.conn.Close()
-}
-
-func (peer *Peer) run() {
-	const BLOCK_REQUEST_TIMEOUT_MS = 5000
-	for peer.Connected {
-		// Check if alive
-
-		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
-			// Cancel all requests
-			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
-			peer.requestOutQueue = make([]BlockRequest, 0)
-			peer.Close()
-			break
-		}
-
-		if len(peer.requestOutQueue) == 0 {
-			peer.sendNotInterested()
-		}
-
-
-		// Process messages in
-		msgIn, err := peer.readMessage()
-		if err != nil {
-			fmt.Println("Error reading message from peer: ", err)
-		}
-		err = peer.handleMessageIn(msgIn)
-		if err != nil {
-			fmt.Println("Error handling message from peer: ", err)
-		}
-
-		// Process messages out
-		if len(peer.requestOutQueue) > 0 {
-			if !peer.amInterested {
-				peer.sendInterested()
-			} else {
-				if !peer.remoteChoking {
-					for i := range peer.requestOutQueue {
-						if !peer.requestOutQueue[i].sent {
-							err = peer.sendRequest(peer.requestOutQueue[i])
-							if err != nil {
-								fmt.Println("Error sending request to peer: ", err)
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if len(peer.responseOutQueue) > 0 {
-			if !peer.amChoking {
-				for len(peer.responseOutQueue) > 0 {
-					err = peer.sendPiece(peer.responseOutQueue[0])
-					if err != nil {
-						fmt.Println("Error sending piece to peer: ", err)
-					}
-					peer.responseOutQueue = peer.responseOutQueue[1:]
-				}
-			}
-		}
-
-		// Keep alive
-		if time.Now().After(peer.timeLastSent.Add(20 * time.Second)) {
-			err = peer.sendKeepAlive()
-			if err != nil {
-				fmt.Println("Error sending keep alive: ", err)
-			}
-		}
-
-		// Handle timed pieces
-
-		i := 0
-		for i < len(peer.requestOutQueue) {
-			if peer.requestOutQueue[i].sent && time.Now().After(peer.requestOutQueue[i].reqTime.Add(BLOCK_REQUEST_TIMEOUT_MS * time.Millisecond)) {
-				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
-				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
-				continue
-			}
-			i++
-		}
-	}
-}
-
-// handshake interface
-
-func (peer *Peer) readHandshake() error {
-	const HANDSHAKE_TIMEOUT_MS = 5000
-	peer.conn.SetReadDeadline(time.Now().Add(HANDSHAKE_TIMEOUT_MS * time.Millisecond))
-	handshakeBytes := make([]byte, 68)
-	n, err := peer.conn.Read(handshakeBytes)
-	if err != nil {
-		return err
-	}
-	if n != 68 {
-		return errors.New("invalid handshake length")
-	}
-	handshakeMsg, err := message.ParseHandshake(handshakeBytes)
-	if err != nil {
-		return err
-	}
-	if peer.peerID != handshakeMsg.PeerID {
-		return errors.New("peerID mismatch")
-	}
-	if !bytes.Equal(peer.infoHash, handshakeMsg.InfoHash) {
-		return errors.New("infohash mismatch")
-	}
-	return nil
-}
-
-func (peer *Peer) sendHandshake() error {
-	const HANDSHAKE_TIMEOUT_MS = 5000
-	peer.conn.SetWriteDeadline(time.Now().Add(HANDSHAKE_TIMEOUT_MS * time.Millisecond))
-	handshakeMsg := message.NewHandshake(peer.infoHash, peer.peerID)
-	n, err := peer.conn.Write(handshakeMsg.GetBytes())
-	if err != nil {
-		return err
-	}
-	if n != 68 {
-		return errors.New("handshake send incomplete")
-	}
-	if peer.bitField != nil && peer.bitField.NumSet > 0 {
-		err = peer.sendBitField()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (peer *Peer) handleMessageIn(msg *message.Message) error {
-	peer.timeLastReceived = time.Now()
-	switch msg.Type {
-	case message.KEEP_ALIVE:
-		// Do nothing
-	case message.CHOKE:
-		peer.remoteChoking = true
-	case message.UNCHOKE:
-		peer.remoteChoking = false
-	case message.INTERESTED:
-		peer.remoteInterested = true
-	case message.NOT_INTERESTED:
-		peer.mux.Lock()
-		peer.remoteInterested = false
-		peer.requestInQueue = make([]BlockRequest, 0)
-		peer.mux.Unlock()
-	case message.HAVE:
-		peer.remoteBitField.SetBit(int64(msg.Index))
-	case message.BITFIELD:
-		peer.remoteBitField = bitfield.LoadBytes(msg.BitField, peer.numPieces)
-	case message.REQUEST:
-		if !peer.remoteInterested || peer.amChoking {
-			return nil
-		}
-		peer.mux.Lock()
-		newReq := BlockRequest{
-						info: bundle.BlockInfo{
-							PieceIndex: int64(msg.Index), 
-							BeginOffset: int64(msg.Begin),
-							Length: int64(msg.Length),
-						},
-						reqTime: time.Now(),
-						sent: false,
-					}
-		// Move to back of queue
-		i := 0
-		for i < len(peer.requestInQueue) {
-			if peer.requestInQueue[i].Equal(newReq) {
-				peer.requestInQueue = append(peer.requestInQueue[:i], peer.requestInQueue[i+1:]...)
-				break
-			}
-			i++
-		}
-		peer.requestInQueue = append(peer.requestInQueue, newReq)
-		peer.mux.Unlock()
-	case message.PIECE:
-		peer.mux.Lock()
-		newRes := BlockResponse{
-			PieceIndex: msg.Index,
-			BeginOffset: msg.Begin,
-			Block: msg.Piece,
-		}
-		i := 0
-		found := false
-		for i < len(peer.requestOutQueue) {
-			if newRes.EqualToReq(peer.requestOutQueue[i]) {
-				found = true
-				//Remove from out queue
-				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
-				break
-			}
-			i++
-		}
-		if !found {
-			return nil
-		}
-		peer.responseInQueue = append(peer.responseInQueue, newRes)
-		peer.mux.Unlock()
-	case message.CANCEL:
-		peer.mux.Lock()
-		req := BlockRequest{
-			info: bundle.BlockInfo{
-				PieceIndex: int64(msg.Index),
-				BeginOffset: int64(msg.Begin),
-				Length: int64(msg.Length),
-			},
-			sent: false,
-			reqTime: time.Time{},
-		}
-		i := 0
-		for i < len(peer.requestInQueue) {
-			if peer.requestInQueue[i].Equal(req) {
-				peer.requestInQueue = append(peer.requestInQueue[:i], peer.requestInQueue[i+1:]...)
-				break
-			}
-			i++
-		}
-		peer.mux.Unlock()
-	case message.PORT:
-		// Not implemented
-	default:
-		return errors.New("unknown message type")
-	}
-	return nil
-}
-
-// Connection interface
-
-func (peer *Peer) sendMessage(msg *message.Message) error {
-	if !peer.Connected {
-		return nil
-	}
-	const MESSAGE_SEND_TIMEOUT = 1000
-	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
-	if PEER_DEBUG {
-		fmt.Printf("Sending msg to peer(%s): ", peer.peerID)
-		msg.Print()
-	}
-	msgBytes := msg.GetBytes()
-	n, err := peer.conn.Write(msgBytes)
-	if err != nil {
-		return err
-	}
-	if n != len(msgBytes) {
-		return errors.New("incomplete message send")
-	}
-	peer.timeLastSent = time.Now()
-	return nil
-}
-
-func (peer *Peer) sendKeepAlive() error {
-	return peer.sendMessage(message.NewKeepAlive())
-}
-
-func (peer *Peer) sendInterested() error {
-	peer.amInterested = true
-	return peer.sendMessage(message.NewInterested())
-}
-
-func (peer *Peer) sendNotInterested() error {
-	peer.amInterested = false
-	return peer.sendMessage(message.NewNotInterested())
-}
-
-func (peer *Peer) sendChoke() error {
-	peer.amChoking = true
-	return peer.sendMessage(message.NewChoke())
-}
-
-func (peer *Peer) sendUnchoke() error {
-	peer.amChoking = false
-	return peer.sendMessage(message.NewUnchoke())
-}
-
-func (peer *Peer) sendHave(pieceIndex uint32) error {
-	if peer.bitField.GetBit(int64(pieceIndex)) {
-		return nil
-	}
-	return peer.sendMessage(message.NewHave(pieceIndex))
-}
-
-func (peer *Peer) sendBitField() error {
-	return peer.sendMessage(message.NewBitfield(peer.bitField.Bytes))
-}
-
-func (peer *Peer) sendRequest(req BlockRequest) error {
-	return peer.sendMessage(message.NewRequest(&req.info))
-}
-
-func (peer *Peer) sendPiece(res BlockResponse) error {
-	found := false
-	for _, req := range peer.requestInQueue {
-		if res.EqualToReq(req) {
-			found = true
-			break
-		}
-	}
-	//Piece probably cancelled
-	if !found {
-		return nil
-	}
-	return peer.sendMessage(message.NewPiece(res.PieceIndex, res.BeginOffset, res.Block))
-}
-
-func (peer *Peer) sendCancel(req BlockRequest) error {
-	i := 0
-	found := false
-	for i < len(peer.requestOutQueue) {
-		if peer.requestOutQueue[i].Equal(req) {
-			peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
-			found = true
-			break
-		}
-		i++
-	}
-	if !found {
-		return nil
-	}
-	return peer.sendMessage(message.NewCancel(&req.info))
-}
-
-func (peer *Peer) readMessage() (*message.Message, error) {
-	if !peer.Connected {
-		return nil, nil
-	}
-	const MESSAGE_READ_TIMEOUT = 1000
-	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
-	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT * time.Millisecond))
-	n, err := peer.conn.Read(msgLenBytes)
-	if err != nil {
-		return nil, err
-	}
-	if n != 4 {
-		return nil, errors.New("malformed message length read")
-	}
-	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
-	if msgLen > MAX_MESSAGE_LENGTH {
-		return nil, errors.New("message length exceeds max of 17kb")
-	}
-	if msgLen == 0 {
-		return message.NewKeepAlive(), nil
-	}
-	msgBytes := make([]byte, 0)
-	n, err = peer.conn.Read(msgBytes)
-	if err != nil {
-		return nil, err
-	}
-	if n != msgLen {
-		return nil, errors.New("incomplete message read")
-	}
-	msg, err := message.ParseMessage(msgBytes)
-	if err != nil {
-		return nil, err
-	}
-	return msg, nil
 }
 
 // Exported Interface
@@ -619,4 +298,383 @@ func (peer *Peer) Have(pieceIndex int64) error {
 		peer.sendHave(uint32(pieceIndex))
 	}
 	return nil
+}
+
+func (peer *Peer) run() {
+	const BLOCK_REQUEST_TIMEOUT_MS = 5000
+	for peer.Connected {
+		peer.UpdateRates()
+
+		// Check if alive
+
+		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
+			// Cancel all requests
+			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
+			peer.requestOutQueue = make([]BlockRequest, 0)
+			peer.Close()
+			break
+		}
+
+		if len(peer.requestOutQueue) == 0 {
+			peer.sendNotInterested()
+		}
+
+
+		// Process messages in
+		msgIn, err := peer.readMessage()
+		if err != nil {
+			fmt.Println("Error reading message from peer: ", err)
+		}
+		err = peer.handleMessageIn(msgIn)
+		if err != nil {
+			fmt.Println("Error handling message from peer: ", err)
+		}
+
+		// Process messages out
+		if len(peer.requestOutQueue) > 0 {
+			if !peer.amInterested {
+				peer.sendInterested()
+			} else {
+				if !peer.remoteChoking {
+					for i := range peer.requestOutQueue {
+						if !peer.requestOutQueue[i].sent {
+							err = peer.sendRequest(peer.requestOutQueue[i])
+							if err != nil {
+								fmt.Println("Error sending request to peer: ", err)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if len(peer.responseOutQueue) > 0 {
+			if !peer.amChoking {
+				for len(peer.responseOutQueue) > 0 {
+					err = peer.sendPiece(peer.responseOutQueue[0])
+					if err != nil {
+						fmt.Println("Error sending piece to peer: ", err)
+					}
+					peer.responseOutQueue = peer.responseOutQueue[1:]
+				}
+			}
+		}
+
+		// Keep alive
+		if time.Now().After(peer.timeLastSent.Add(20 * time.Second)) {
+			err = peer.sendKeepAlive()
+			if err != nil {
+				fmt.Println("Error sending keep alive: ", err)
+			}
+		}
+
+		// Handle timed pieces
+
+		i := 0
+		for i < len(peer.requestOutQueue) {
+			if peer.requestOutQueue[i].sent && time.Now().After(peer.requestOutQueue[i].reqTime.Add(BLOCK_REQUEST_TIMEOUT_MS * time.Millisecond)) {
+				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
+				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
+				continue
+			}
+			i++
+		}
+	}
+}
+
+func (peer *Peer) UpdateRates() {
+	peer.mux.Lock()
+	defer peer.mux.Unlock()
+
+	now := time.Now()
+	downloadElapsed := now.Sub(peer.lastDownloadUpdate).Milliseconds()
+	uploadElapsed := now.Sub(peer.lastUploadUpdate).Milliseconds()
+	if downloadElapsed > 500 && peer.bytesDownloaded > 0 {
+		peer.DownloadRate = float64(peer.bytesDownloaded) / (float64(downloadElapsed) / 1000) / 1024
+		peer.totalBytesDownloaded += peer.bytesDownloaded
+		peer.bytesDownloaded = 0
+		peer.lastDownloadUpdate = now
+	}
+	if uploadElapsed > 500 && peer.bytesUploaded > 0 {
+		peer.UploadRate = float64(peer.bytesUploaded) / (float64(uploadElapsed) / 1000) / 1024
+		peer.totalBytesUploaded += peer.bytesUploaded
+		peer.bytesUploaded = 0
+		peer.lastUploadUpdate = now
+	}
+}
+
+// handshake interface
+
+func (peer *Peer) readHandshake() error {
+	const HANDSHAKE_TIMEOUT_MS = 5000
+	peer.conn.SetReadDeadline(time.Now().Add(HANDSHAKE_TIMEOUT_MS * time.Millisecond))
+	handshakeBytes := make([]byte, 68)
+	n, err := peer.conn.Read(handshakeBytes)
+	if err != nil {
+		return err
+	}
+	if n != 68 {
+		return errors.New("invalid handshake length")
+	}
+	handshakeMsg, err := message.ParseHandshake(handshakeBytes)
+	if err != nil {
+		return err
+	}
+	if peer.peerID != handshakeMsg.PeerID {
+		return errors.New("peerID mismatch")
+	}
+	if !bytes.Equal(peer.infoHash, handshakeMsg.InfoHash) {
+		return errors.New("infohash mismatch")
+	}
+	return nil
+}
+
+func (peer *Peer) sendHandshake() error {
+	const HANDSHAKE_TIMEOUT_MS = 5000
+	peer.conn.SetWriteDeadline(time.Now().Add(HANDSHAKE_TIMEOUT_MS * time.Millisecond))
+	handshakeMsg := message.NewHandshake(peer.infoHash, peer.peerID)
+	n, err := peer.conn.Write(handshakeMsg.GetBytes())
+	if err != nil {
+		return err
+	}
+	if n != 68 {
+		return errors.New("handshake send incomplete")
+	}
+	if peer.bitField != nil && peer.bitField.NumSet > 0 {
+		err = peer.sendBitField()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (peer *Peer) handleMessageIn(msg *message.Message) error {
+	peer.timeLastReceived = time.Now()
+	switch msg.Type {
+	case message.KEEP_ALIVE:
+		// Do nothing
+	case message.CHOKE:
+		peer.remoteChoking = true
+	case message.UNCHOKE:
+		peer.remoteChoking = false
+	case message.INTERESTED:
+		peer.remoteInterested = true
+	case message.NOT_INTERESTED:
+		peer.mux.Lock()
+		peer.remoteInterested = false
+		peer.requestInQueue = make([]BlockRequest, 0)
+		peer.mux.Unlock()
+	case message.HAVE:
+		peer.remoteBitField.SetBit(int64(msg.Index))
+	case message.BITFIELD:
+		peer.remoteBitField = bitfield.LoadBytes(msg.BitField, peer.numPieces)
+	case message.REQUEST:
+		if !peer.remoteInterested || peer.amChoking {
+			return nil
+		}
+		peer.mux.Lock()
+		newReq := BlockRequest{
+						info: bundle.BlockInfo{
+							PieceIndex: int64(msg.Index), 
+							BeginOffset: int64(msg.Begin),
+							Length: int64(msg.Length),
+						},
+						reqTime: time.Now(),
+						sent: false,
+					}
+		// Move to back of queue
+		i := 0
+		for i < len(peer.requestInQueue) {
+			if peer.requestInQueue[i].Equal(newReq) {
+				peer.requestInQueue = append(peer.requestInQueue[:i], peer.requestInQueue[i+1:]...)
+				break
+			}
+			i++
+		}
+		peer.requestInQueue = append(peer.requestInQueue, newReq)
+		peer.mux.Unlock()
+	case message.PIECE:
+		peer.mux.Lock()
+		peer.bytesDownloaded += int64(len(msg.Piece))
+		newRes := BlockResponse{
+			PieceIndex: msg.Index,
+			BeginOffset: msg.Begin,
+			Block: msg.Piece,
+		}
+		i := 0
+		found := false
+		for i < len(peer.requestOutQueue) {
+			if newRes.EqualToReq(peer.requestOutQueue[i]) {
+				found = true
+				//Remove from out queue
+				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
+				break
+			}
+			i++
+		}
+		if !found {
+			return nil
+		}
+		peer.responseInQueue = append(peer.responseInQueue, newRes)
+		peer.mux.Unlock()
+	case message.CANCEL:
+		peer.mux.Lock()
+		req := BlockRequest{
+			info: bundle.BlockInfo{
+				PieceIndex: int64(msg.Index),
+				BeginOffset: int64(msg.Begin),
+				Length: int64(msg.Length),
+			},
+			sent: false,
+			reqTime: time.Time{},
+		}
+		i := 0
+		for i < len(peer.requestInQueue) {
+			if peer.requestInQueue[i].Equal(req) {
+				peer.requestInQueue = append(peer.requestInQueue[:i], peer.requestInQueue[i+1:]...)
+				break
+			}
+			i++
+		}
+		peer.mux.Unlock()
+	case message.PORT:
+		// Not implemented
+	default:
+		return errors.New("unknown message type")
+	}
+	return nil
+}
+
+// Connection interface
+
+func (peer *Peer) sendMessage(msg *message.Message) error {
+	if !peer.Connected {
+		return nil
+	}
+	const MESSAGE_SEND_TIMEOUT = 1000
+	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
+	if PEER_DEBUG {
+		fmt.Printf("Sending msg to peer(%s): ", peer.peerID)
+		msg.Print()
+	}
+	msgBytes := msg.GetBytes()
+	n, err := peer.conn.Write(msgBytes)
+	if err != nil {
+		return err
+	}
+	if n != len(msgBytes) {
+		return errors.New("incomplete message send")
+	}
+	peer.timeLastSent = time.Now()
+	return nil
+}
+
+func (peer *Peer) sendKeepAlive() error {
+	return peer.sendMessage(message.NewKeepAlive())
+}
+
+func (peer *Peer) sendInterested() error {
+	peer.amInterested = true
+	return peer.sendMessage(message.NewInterested())
+}
+
+func (peer *Peer) sendNotInterested() error {
+	peer.amInterested = false
+	return peer.sendMessage(message.NewNotInterested())
+}
+
+func (peer *Peer) sendChoke() error {
+	peer.amChoking = true
+	return peer.sendMessage(message.NewChoke())
+}
+
+func (peer *Peer) sendUnchoke() error {
+	peer.amChoking = false
+	return peer.sendMessage(message.NewUnchoke())
+}
+
+func (peer *Peer) sendHave(pieceIndex uint32) error {
+	if peer.bitField.GetBit(int64(pieceIndex)) {
+		return nil
+	}
+	return peer.sendMessage(message.NewHave(pieceIndex))
+}
+
+func (peer *Peer) sendBitField() error {
+	return peer.sendMessage(message.NewBitfield(peer.bitField.Bytes))
+}
+
+func (peer *Peer) sendRequest(req BlockRequest) error {
+	return peer.sendMessage(message.NewRequest(&req.info))
+}
+
+func (peer *Peer) sendPiece(res BlockResponse) error {
+	found := false
+	for _, req := range peer.requestInQueue {
+		if res.EqualToReq(req) {
+			found = true
+			break
+		}
+	}
+	//Piece probably cancelled
+	if !found {
+		return nil
+	}
+	peer.bytesUploaded += int64(len(res.Block))
+	return peer.sendMessage(message.NewPiece(res.PieceIndex, res.BeginOffset, res.Block))
+}
+
+func (peer *Peer) sendCancel(req BlockRequest) error {
+	i := 0
+	found := false
+	for i < len(peer.requestOutQueue) {
+		if peer.requestOutQueue[i].Equal(req) {
+			peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
+			found = true
+			break
+		}
+		i++
+	}
+	if !found {
+		return nil
+	}
+	return peer.sendMessage(message.NewCancel(&req.info))
+}
+
+func (peer *Peer) readMessage() (*message.Message, error) {
+	if !peer.Connected {
+		return nil, nil
+	}
+	const MESSAGE_READ_TIMEOUT = 1000
+	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
+	msgLenBytes := make([]byte, 4)
+	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT * time.Millisecond))
+	n, err := peer.conn.Read(msgLenBytes)
+	if err != nil {
+		return nil, err
+	}
+	if n != 4 {
+		return nil, errors.New("malformed message length read")
+	}
+	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
+	if msgLen > MAX_MESSAGE_LENGTH {
+		return nil, errors.New("message length exceeds max of 17kb")
+	}
+	if msgLen == 0 {
+		return message.NewKeepAlive(), nil
+	}
+	msgBytes := make([]byte, 0)
+	n, err = peer.conn.Read(msgBytes)
+	if err != nil {
+		return nil, err
+	}
+	if n != msgLen {
+		return nil, errors.New("incomplete message read")
+	}
+	msg, err := message.ParseMessage(msgBytes)
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
 }

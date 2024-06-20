@@ -44,12 +44,21 @@ func New(len int64) *BitField {
 	return &bf
 }
 
-func (bf *BitField) GetAll() []byte {
-	return bf.Bytes
-}
-
 func (bf *BitField) Len() int64 {
 	return bf.len
+}
+
+func (bf *BitField) FirstOff() int64 {
+	for i := range bf.Bytes {
+		if bf.Bytes[i] != 0xFF {
+			for j := 0; j < 8; j++ {
+				if (bf.Bytes[i] & (1 << (7 - j)))  == 0 {
+					return int64(i * 8) + int64(j)
+				}
+			}
+		}
+	}
+	return -1
 }
 
 func (bf *BitField) SetBit(index int64) error {
@@ -93,6 +102,7 @@ func (bfA *BitField) And(bfB *BitField) *BitField {
 	}
 	return LoadBytes(bytes, len)
 }
+
 
 func (bf *BitField) Print() {
 	for _, b := range bf.Bytes {

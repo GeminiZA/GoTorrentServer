@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
-	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
@@ -134,52 +132,29 @@ func (m *Message) GetBytes() []byte {
 	return nil
 }
 
-func ReadHandshake(conn net.Conn, timeout time.Duration) (*Message, error) {
+func ParseHandshake(bytes []byte) (*Message, error) {
 	msg := Message{Type: HANDSHAKE}
-	deadline := time.Now().Add(timeout)
-	pstrlenBytes := make([]byte, 1)
-	err := conn.SetReadDeadline(deadline)
-	if err != nil {
-		return nil, err
+	if len(bytes) != 68 {
+		return nil, errors.New("invalid handshake length")
 	}
-	_, err = conn.Read(pstrlenBytes)
-	if err != nil {
-		return nil, err
-	}
-	pstrlen := pstrlenBytes[0]
+	pstrlen := bytes[0]
 	if pstrlen != 19 {
 		return nil, errors.New("invalid protocol string")
 	}
-	restLen := pstrlen + 48 // reserved (8) infohash (20) peerID (20)
-	rest := make([]byte, restLen) 
-	_, err = conn.Read(rest)
-	if err != nil {
-		return nil, err
-	}
-	if string(rest[0:pstrlen]) != "BitTorrent protocol" {
+	pstr := string(bytes[1:20])
+	if pstr != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
-	msg.Reserved = rest[pstrlen : pstrlen + 8]
-	msg.InfoHash = rest[pstrlen + 8:pstrlen + 28]
-	msg.PeerID = string(rest[pstrlen + 28: pstrlen + 48])
+	msg.Reserved = bytes[20 : 28]
+	msg.InfoHash = bytes[28:48]
+	msg.PeerID = string(bytes[48:68])
 	return &msg, nil
 }
 
-func ReadMessage(conn net.Conn) (*Message, error) {
+func ParseMessage(bytes []byte) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
-	msgLenBytes := make([]byte, 4)
 
-	conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-
-	_, err := conn.Read(msgLenBytes)
-	if err != nil {
-		return nil, err
-	}
-	msgLen := binary.BigEndian.Uint32(msgLenBytes)
-	if DEBUG_MESSAGE {
-		fmt.Printf("Message length bytes read: %x\n", msgLenBytes)
-		fmt.Printf("Message length read: %d\n", msgLen)
-	}
+	msgLen := len(bytes)
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")
@@ -188,22 +163,7 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		return &Message{Type: KEEP_ALIVE}, nil
 	}
 	msgBytes := make([]byte, 0)
-	bytesRead := 0
-	for bytesRead < int(msgLen) {
-		buf := make([]byte, msgLen)
-		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT_MS * time.Millisecond))
-		n, err := conn.Read(buf)
-		if err != nil {
-			return nil, err
-		}
-		msgBytes = append(msgBytes, buf[:n]...)
-		bytesRead += n
-	}
 	msgID := msgBytes[0]
-	if DEBUG_MESSAGE {
-		fmt.Printf("Read message: Length: %d, id: %d\n", msgLen, msgID)
-		fmt.Printf("Message bytes: %x%x\n", msgLenBytes, msgBytes)
-	}
 	switch msgID {
 	case 0: // choke
 		return &Message{Type: CHOKE}, nil
@@ -218,8 +178,8 @@ func ReadMessage(conn net.Conn) (*Message, error) {
 		return &Message{Type: HAVE, Index: pieceIndex}, nil
 	case 5: // bitfield
 		bitField := msgBytes[1:msgLen]
-		bitFieldLength := msgLen - 1
-		return &Message{Type: BITFIELD, BitField: bitField, Length: bitFieldLength}, nil
+		bitFieldLength := msgLen - 1 // In bytes
+		return &Message{Type: BITFIELD, BitField: bitField, Length: uint32(bitFieldLength)}, nil
 	case 6: // request
 		pieceIndex := binary.BigEndian.Uint32(msgBytes[1:5])
 		beginOffset := binary.BigEndian.Uint32(msgBytes[5:9])
@@ -319,8 +279,8 @@ func NewPiece(index uint32, beginOffset uint32, block []byte) *Message {
 	return &Message{Type: PIECE, Index: index, Begin: beginOffset, Piece: block}
 }
 
-func NewCancel(index uint32, beginOffset uint32, length uint32) *Message {
-	return &Message{Type: CANCEL, Index: index, Begin: beginOffset, Length: length}
+func NewCancel(bi *bundle.BlockInfo) *Message {
+	return &Message{Type: CANCEL, Index: uint32(bi.PieceIndex), Begin: uint32(bi.BeginOffset), Length: uint32(bi.Length)}
 }
 
 func NewPort(port uint32) *Message {

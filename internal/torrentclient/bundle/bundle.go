@@ -34,7 +34,7 @@ type Bundle struct {
 	NumPieces int64
 	Files []*BundleFile
 	MultiFile bool
-	BitField *bitfield.BitField
+	Bitfield *bitfield.Bitfield
 	Complete bool
 	pieceCache *PieceCache
 	mux sync.Mutex
@@ -119,7 +119,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	//bitfield
 
-	bundle.BitField = bitfield.New(bundle.NumPieces)
+	bundle.Bitfield = bitfield.New(bundle.NumPieces)
 
 	//Write files
 
@@ -164,13 +164,13 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 		if BUNDLE_DEBUG {
 			fmt.Printf("Pieces[%d] complete... writing piece...\n", pieceIndex)
 		}
-		bundle.BitField.SetBit(pieceIndex)
+		bundle.Bitfield.SetBit(pieceIndex)
 		err := bundle.writePiece(pieceIndex)
 		if err != nil {
 			return err
 		}
 	}
-	if bundle.BitField.Complete() {
+	if bundle.Bitfield.Complete() {
 		bundle.Complete = true
 	}
 	if BUNDLE_DEBUG {
@@ -287,10 +287,10 @@ func (bundle *Bundle) NextBlock(pieceIndex int64) (*BlockInfo, error) { // Retur
 }
 
 func (bundle *Bundle) BytesLeft() int64 {
-	return (bundle.BitField.Len() - bundle.BitField.NumSet) * bundle.PieceLength
+	return (bundle.Bitfield.Len() - bundle.Bitfield.NumSet) * bundle.PieceLength
 }
 
 func (bundle *Bundle) PrintStatus() {
 	fmt.Printf("Bundle status: \n")
-	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.BitField.NumSet, bundle.NumPieces)
+	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
 }

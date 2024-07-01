@@ -13,6 +13,12 @@ import (
 
 const DEBUG_TRACKER bool = true
 
+type PeerInfo struct {
+	PeerID string
+	IP string
+	Port int
+}
+
 type Tracker struct {
 	instantiated bool
 	started bool
@@ -28,7 +34,7 @@ type Tracker struct {
 	MinInterval int64
 	Seeders int64
 	Leechers int64
-	Peers []map[string]interface{}
+	Peers []PeerInfo
 }
 
 func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) (*Tracker) {
@@ -102,6 +108,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 			}
 		}
 	}
+	tracker.Peers = make([]PeerInfo, 0)
 	if peers, ok := bodyDict["peers"]; ok {
 		if DEBUG_TRACKER {
 			fmt.Printf("Found peers: %v\n", peers)
@@ -113,7 +120,21 @@ func (tracker *Tracker) parseBody(body []byte) error {
 					peersList = append(peersList, mp)
 				}
 			}
-			tracker.Peers = peersList
+			for _, peer := range peersList {
+				peerID, ok := peer["peer id"].(string)
+				if !ok {
+					return errors.New("peer id not string")
+				}
+				peerIP, ok := peer["ip"].(string)
+				if !ok {
+					return errors.New("peer ip not string")
+				}
+				peerPort, ok := peer["port"].(int64)
+				if !ok {
+					return errors.New("peerid not string")
+				}
+				tracker.Peers = append(tracker.Peers, PeerInfo{PeerID: peerID, IP: peerIP, Port: int(peerPort)})
+			}
 		}
 	} else {
 		return errors.New("no peers in response")

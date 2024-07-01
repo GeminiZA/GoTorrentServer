@@ -1,4 +1,5 @@
-// Keepalive not working
+// Todo:
+// handle incoming peer connections
 package peer
 
 import (
@@ -53,8 +54,8 @@ type Peer struct {
 	remotePeerID 			string
 	peerID 					string
 	infoHash 				[]byte
-	bitField 				*bitfield.BitField
-	remoteBitField 			*bitfield.BitField
+	bitField 				*bitfield.Bitfield
+	remoteBitfield 			*bitfield.Bitfield
 	numPieces 				int64
 	//Functional
 	conn 					net.Conn
@@ -74,17 +75,16 @@ type Peer struct {
 	responseInQueue 		[]BlockResponse
 	responseOutQueue 		[]BlockResponse
 	requestCancelledQueue 	[]BlockRequest
-	//Rate
-	totalBytesUploaded 		int64
-	totalBytesDownloaded	int64
+	//RateKB
+	TotalBytesUploaded 		int64
+	TotalBytesDownloaded	int64
 	bytesDownloaded			int64
 	bytesUploaded			int64
-	DownloadRate			float64
-	UploadRate				float64
+	DownloadRateKB			float64
+	UploadRateKB			float64
 	lastDownloadUpdate 		time.Time
 	lastUploadUpdate 		time.Time
 }
-
 
 func Connect(
 		remotePeerID string, 
@@ -92,7 +92,7 @@ func Connect(
 		remotePort int, 
 		infohash []byte, 
 		peerID string, 
-		bitfield *bitfield.BitField,
+		bitfield *bitfield.Bitfield,
 		numPieces int64,
 	) (*Peer, error) {
 
@@ -101,7 +101,7 @@ func Connect(
 		remotePeerID: remotePeerID,
 		infoHash: infohash,
 		bitField: bitfield,
-		remoteBitField: nil,
+		remoteBitfield: nil,
 		numPieces: numPieces,
 		timeLastReceived: time.Now(),
 		timeLastSent: time.Now(),
@@ -117,15 +117,15 @@ func Connect(
 		responseOutQueue: make([]BlockResponse, 0),
 		responseInQueue: make([]BlockResponse, 0),
 		requestCancelledQueue: make([]BlockRequest, 0),
-		// Rates
+		// RateKBs
 		lastDownloadUpdate: time.Now(),
 		lastUploadUpdate: time.Now(),
 		bytesUploaded: 0,
 		bytesDownloaded: 0,
-		totalBytesUploaded: 0,
-		totalBytesDownloaded: 0,
-		DownloadRate: 0,
-		UploadRate: 0,
+		TotalBytesUploaded: 0,
+		TotalBytesDownloaded: 0,
+		DownloadRateKB: 0,
+		UploadRateKB: 0,
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", remoteIP, remotePort))
@@ -389,15 +389,15 @@ func (peer *Peer) UpdateRates() {
 	now := time.Now()
 	downloadElapsed := now.Sub(peer.lastDownloadUpdate).Milliseconds()
 	uploadElapsed := now.Sub(peer.lastUploadUpdate).Milliseconds()
-	if downloadElapsed > 500 && peer.bytesDownloaded > 0 {
-		peer.DownloadRate = float64(peer.bytesDownloaded) / (float64(downloadElapsed) / 1000) / 1024
-		peer.totalBytesDownloaded += peer.bytesDownloaded
+	if downloadElapsed > 1000 && peer.bytesDownloaded > 0 {
+		peer.DownloadRateKB = float64(peer.bytesDownloaded) / (float64(downloadElapsed) / 1000) / 1024
+		peer.TotalBytesDownloaded += peer.bytesDownloaded
 		peer.bytesDownloaded = 0
 		peer.lastDownloadUpdate = now
 	}
-	if uploadElapsed > 500 && peer.bytesUploaded > 0 {
-		peer.UploadRate = float64(peer.bytesUploaded) / (float64(uploadElapsed) / 1000) / 1024
-		peer.totalBytesUploaded += peer.bytesUploaded
+	if uploadElapsed > 1000 && peer.bytesUploaded > 0 {
+		peer.UploadRateKB = float64(peer.bytesUploaded) / (float64(uploadElapsed) / 1000) / 1024
+		peer.TotalBytesUploaded += peer.bytesUploaded
 		peer.bytesUploaded = 0
 		peer.lastUploadUpdate = now
 	}
@@ -466,9 +466,9 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.requestInQueue = make([]BlockRequest, 0)
 		peer.mux.Unlock()
 	case message.HAVE:
-		peer.remoteBitField.SetBit(int64(msg.Index))
+		peer.remoteBitfield.SetBit(int64(msg.Index))
 	case message.BITFIELD:
-		peer.remoteBitField = bitfield.LoadBytes(msg.BitField, peer.numPieces)
+		peer.remoteBitfield = bitfield.FromBytes(msg.BitField, peer.numPieces)
 	case message.REQUEST:
 		if !peer.remoteInterested || peer.amChoking {
 			return nil

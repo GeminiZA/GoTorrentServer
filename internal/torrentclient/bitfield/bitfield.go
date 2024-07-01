@@ -1,19 +1,20 @@
 package bitfield
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
 
-type BitField struct {
+type Bitfield struct {
 	Bytes []byte
 	len int64
 	Full bool
 	NumSet int64
 }
 
-func LoadBytes(bytes []byte, len int64) *BitField {
-	bf := BitField{Bytes: bytes, len: len}
+func FromBytes(bytes []byte, len int64) *Bitfield {
+	bf := Bitfield{Bytes: bytes, len: len}
 	bf.Full = bf.Complete()
 	for _, b := range bytes { //Count on bits
 		if b == 0xFF {
@@ -29,14 +30,33 @@ func LoadBytes(bytes []byte, len int64) *BitField {
 	return &bf
 }
 
-func New(len int64) *BitField {
-	var byteLen int64
-	if len % 8 != 0 {
-		byteLen = (len / 8) + 1
-	} else {
-		byteLen = len / 8
+func FromHex(bfHex string, Length int64) (*Bitfield, error) {
+	byteLen := (Length + 7) / 8
+	bytes, err := hex.DecodeString(bfHex)
+	if err != nil {
+		return nil, err
 	}
-	bf := BitField{Bytes: []byte{}, len: len, Full: false}
+	if int64(len(bytes)) != byteLen {
+		return nil, errors.New("hex string length does not match bytes")
+	}
+	bf := Bitfield{Bytes: bytes, len: Length}
+	for _, b := range bytes {
+		if b == 0xFF {
+			bf.NumSet += 8
+		} else {
+			curByte := b
+			for curByte != 0 {
+				curByte &= curByte - 1
+				bf.NumSet++
+			}
+		}
+	}
+	return &bf, nil
+}
+
+func New(len int64) *Bitfield {
+	byteLen := (len + 7) / 8
+	bf := Bitfield{Bytes: []byte{}, len: len, Full: false}
 	for i := int64(0); i < byteLen; i++ {
 		bf.Bytes = append(bf.Bytes, 0)
 	}
@@ -44,11 +64,15 @@ func New(len int64) *BitField {
 	return &bf
 }
 
-func (bf *BitField) Len() int64 {
+func (bf *Bitfield) Len() int64 {
 	return bf.len
 }
 
-func (bf *BitField) FirstOff() int64 {
+func (bf *Bitfield) ToHex() string {
+	return fmt.Sprintf("%x", bf.Bytes)
+}
+
+func (bf *Bitfield) FirstOff() int64 {
 	for i := range bf.Bytes {
 		if bf.Bytes[i] != 0xFF {
 			for j := 0; j < 8; j++ {
@@ -61,7 +85,7 @@ func (bf *BitField) FirstOff() int64 {
 	return -1
 }
 
-func (bf *BitField) SetBit(index int64) error {
+func (bf *Bitfield) SetBit(index int64) error {
 	if index > int64(len(bf.Bytes))/8 {
 		return errors.New("out of bounds")
 	}
@@ -73,13 +97,13 @@ func (bf *BitField) SetBit(index int64) error {
 	return nil
 }
 
-func (bf *BitField) GetBit(index int64) bool {
+func (bf *Bitfield) GetBit(index int64) bool {
 	byteIndex := index / 8
 	bitIndex := index % 8
 	return (1 & (bf.Bytes[byteIndex] >> (7 - bitIndex))) == 1
 }
 
-func (bf *BitField) Complete() bool {
+func (bf *Bitfield) Complete() bool {
 	for _, b := range bf.Bytes {
 		if !(b == 0xFF) {
 			return false
@@ -88,23 +112,30 @@ func (bf *BitField) Complete() bool {
 	return true
 }
 
-func (bfA *BitField) And(bfB *BitField) *BitField {
+func (bfA *Bitfield) And(bfB *Bitfield) *Bitfield {
 	len := min(bfA.len, bfB.len)
-	var byteLen int64
-	if len % 8 != 0 {
-		byteLen = (len / 8) + 1
-	} else {
-		byteLen = len / 8
-	}
+	byteLen := (len + 7) / 8
 	bytes := make([]byte, byteLen)
 	for i := range bytes {
 		bytes[i] = bfA.Bytes[i] & bfB.Bytes[i]
 	}
-	return LoadBytes(bytes, len)
+	return FromBytes(bytes, len)
+}
+
+func (bfA *Bitfield) Equals(bfB *Bitfield) bool {
+	if bfA.len != bfB.len {
+		return false
+	}
+	for i := range bfA.Bytes {
+		if bfA.Bytes[i] != bfB.Bytes[i] {
+			return false
+		}
+	}
+	return true
 }
 
 
-func (bf *BitField) Print() {
+func (bf *Bitfield) Print() {
 	for _, b := range bf.Bytes {
 		fmt.Printf("%08b ", b)
 	}

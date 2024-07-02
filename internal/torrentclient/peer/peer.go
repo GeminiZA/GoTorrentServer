@@ -18,31 +18,31 @@ import (
 
 const PEER_DEBUG = true
 
-type BlockResponse struct {
+type blockResponse struct {
 	PieceIndex 				uint32
 	BeginOffset 			uint32
 	Block 					[]byte
 }
 
-func (res BlockResponse) EqualToReq(req BlockRequest) bool {
+func (res blockResponse) EqualToReq(req blockRequest) bool {
 	return res.BeginOffset == uint32(req.info.BeginOffset) &&
 			res.PieceIndex == uint32(req.info.PieceIndex) &&
 			len(res.Block) == int(req.info.Length)
 }
 
-func (resa BlockResponse) Equal(resb BlockResponse) bool {
+func (resa blockResponse) Equal(resb blockResponse) bool {
 	return resa.BeginOffset == resb.BeginOffset &&
 			resa.PieceIndex == resb.PieceIndex &&
 			len(resa.Block) == len(resb.Block)
 }
 
-type BlockRequest struct {
+type blockRequest struct {
 	info 					bundle.BlockInfo
 	reqTime 				time.Time
 	sent 					bool
 }
 
-func (bra BlockRequest) Equal(brb BlockRequest) bool {
+func (bra blockRequest) Equal(brb blockRequest) bool {
 	return bra.info.BeginOffset == brb.info.BeginOffset &&
 			bra.info.PieceIndex == brb.info.PieceIndex &&
 			bra.info.Length == brb.info.Length
@@ -70,11 +70,11 @@ type Peer struct {
 	remoteInterested 		bool
 	remoteChoking 			bool
 	//Queues
-	requestInQueue 			[]BlockRequest
-	requestOutQueue 		[]BlockRequest
-	responseInQueue 		[]BlockResponse
-	responseOutQueue 		[]BlockResponse
-	requestCancelledQueue 	[]BlockRequest
+	requestInQueue 			[]blockRequest
+	requestOutQueue 		[]blockRequest
+	responseInQueue 		[]blockResponse
+	responseOutQueue 		[]blockResponse
+	requestCancelledQueue 	[]blockRequest
 	//RateKB
 	TotalBytesUploaded 		int64
 	TotalBytesDownloaded	int64
@@ -112,11 +112,11 @@ func Connect(
 		remoteInterested: false,
 		remoteChoking: true,
 		// Queues
-		requestInQueue: make([]BlockRequest, 0),
-		requestOutQueue: make([]BlockRequest, 0),
-		responseOutQueue: make([]BlockResponse, 0),
-		responseInQueue: make([]BlockResponse, 0),
-		requestCancelledQueue: make([]BlockRequest, 0),
+		requestInQueue: make([]blockRequest, 0),
+		requestOutQueue: make([]blockRequest, 0),
+		responseOutQueue: make([]blockResponse, 0),
+		responseInQueue: make([]blockResponse, 0),
+		requestCancelledQueue: make([]blockRequest, 0),
 		// RateKBs
 		lastDownloadUpdate: time.Now(),
 		lastUploadUpdate: time.Now(),
@@ -165,7 +165,7 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	newReq := BlockRequest{
+	newReq := blockRequest{
 		info: bi,
 		sent: false,
 		reqTime: time.Time{},
@@ -179,7 +179,7 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	return nil
 }
 
-func (peer *Peer) GetRequestIn() *BlockRequest {
+func (peer *Peer) GetRequestIn() *blockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 	
@@ -195,7 +195,7 @@ func (peer *Peer) QueueResponseOut(pieceIndex int64, beginOffset int64, block []
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	newRes := BlockResponse{
+	newRes := blockResponse{
 		PieceIndex: uint32(pieceIndex),
 		BeginOffset: uint32(beginOffset),
 		Block: block,
@@ -223,7 +223,7 @@ func (peer *Peer) QueueResponseOut(pieceIndex int64, beginOffset int64, block []
 	return nil
 }
 
-func (peer *Peer) GetResponseIn() *BlockResponse {
+func (peer *Peer) GetResponseIn() *blockResponse {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
@@ -236,7 +236,7 @@ func (peer *Peer) GetResponseIn() *BlockResponse {
 	return &br
 }
 
-func (peer *Peer) GetCancelledBlock() *BlockRequest {
+func (peer *Peer) GetCancelledBlock() *blockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
@@ -274,7 +274,7 @@ func (peer *Peer) CancelRequest(bi *bundle.BlockInfo) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	newReq := BlockRequest{
+	newReq := blockRequest{
 		info: *bi,
 		sent: false,
 		reqTime: time.Time{},
@@ -310,7 +310,7 @@ func (peer *Peer) run() {
 		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
 			// Cancel all requests
 			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
-			peer.requestOutQueue = make([]BlockRequest, 0)
+			peer.requestOutQueue = make([]blockRequest, 0)
 			peer.Close()
 			break
 		}
@@ -463,7 +463,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 	case message.NOT_INTERESTED:
 		peer.mux.Lock()
 		peer.remoteInterested = false
-		peer.requestInQueue = make([]BlockRequest, 0)
+		peer.requestInQueue = make([]blockRequest, 0)
 		peer.mux.Unlock()
 	case message.HAVE:
 		peer.remoteBitfield.SetBit(int64(msg.Index))
@@ -474,7 +474,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			return nil
 		}
 		peer.mux.Lock()
-		newReq := BlockRequest{
+		newReq := blockRequest{
 						info: bundle.BlockInfo{
 							PieceIndex: int64(msg.Index), 
 							BeginOffset: int64(msg.Begin),
@@ -497,7 +497,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 	case message.PIECE:
 		peer.mux.Lock()
 		peer.bytesDownloaded += int64(len(msg.Piece))
-		newRes := BlockResponse{
+		newRes := blockResponse{
 			PieceIndex: msg.Index,
 			BeginOffset: msg.Begin,
 			Block: msg.Piece,
@@ -520,7 +520,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.mux.Unlock()
 	case message.CANCEL:
 		peer.mux.Lock()
-		req := BlockRequest{
+		req := blockRequest{
 			info: bundle.BlockInfo{
 				PieceIndex: int64(msg.Index),
 				BeginOffset: int64(msg.Begin),
@@ -605,11 +605,11 @@ func (peer *Peer) sendBitField() error {
 	return peer.sendMessage(message.NewBitfield(peer.bitField.Bytes))
 }
 
-func (peer *Peer) sendRequest(req BlockRequest) error {
+func (peer *Peer) sendRequest(req blockRequest) error {
 	return peer.sendMessage(message.NewRequest(&req.info))
 }
 
-func (peer *Peer) sendPiece(res BlockResponse) error {
+func (peer *Peer) sendPiece(res blockResponse) error {
 	found := false
 	for _, req := range peer.requestInQueue {
 		if res.EqualToReq(req) {
@@ -625,7 +625,7 @@ func (peer *Peer) sendPiece(res BlockResponse) error {
 	return peer.sendMessage(message.NewPiece(res.PieceIndex, res.BeginOffset, res.Block))
 }
 
-func (peer *Peer) sendCancel(req BlockRequest) error {
+func (peer *Peer) sendCancel(req blockRequest) error {
 	i := 0
 	found := false
 	for i < len(peer.requestOutQueue) {

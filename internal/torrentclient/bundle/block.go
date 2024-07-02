@@ -14,6 +14,7 @@ func newBlock(length int64) *Block {
 func (block *Block) write(bytes []byte) {
 	block.bytes = bytes
 	block.Written = true
+	block.Fetching = false
 }
 
 type BlockInfo struct {

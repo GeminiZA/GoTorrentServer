@@ -271,19 +271,29 @@ func (bundle *Bundle) CancelBlock(bi *BlockInfo) error {
 	return nil
 }
 
-func (bundle *Bundle) NextBlock(pieceIndex int64) (*BlockInfo, error) { // Returns pieceIndex, beginOffset, blockLength
-	bundle.mux.Lock()
-	defer bundle.mux.Unlock()
-	
-	byteOffset := int64(0)
-	for _, block := range bundle.Pieces[pieceIndex].Blocks {
-		if !block.Written && !block.Fetching {
-			block.Fetching = true
-			return &BlockInfo{PieceIndex: int64(pieceIndex), BeginOffset: byteOffset, Length: block.Length}, nil
+func (bundle *Bundle) NextNBlocks(numBlocks int) []*BlockInfo {
+	retBlocks := make([]*BlockInfo, 0)
+	for pIndex, piece := range bundle.Pieces {
+		if piece.Complete {
+			continue
 		}
-		byteOffset += block.Length
+		blockByteOffset := int64(0)
+		for bIndex, block := range piece.Blocks {
+			if !block.Fetching && !block.Written {
+				bundle.Pieces[pIndex].Blocks[bIndex].Fetching = true
+				retBlocks = append(retBlocks, &BlockInfo{
+					PieceIndex: int64(pIndex), 
+					BeginOffset: blockByteOffset, 
+					Length: block.Length,
+				})
+			}
+			blockByteOffset += block.Length
+		}
+		if len(retBlocks) == numBlocks {
+			break
+		}
 	}
-	return nil, errors.New("no next block")
+	return retBlocks
 }
 
 func (bundle *Bundle) BytesLeft() int64 {

@@ -12,6 +12,11 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
 
+type blockRequest struct {
+	info 					*bundle.BlockInfo
+	sent 					bool
+}
+
 type Session struct {
 	bundle 			*bundle.Bundle
 	dbc 			*database.DBConn
@@ -31,8 +36,8 @@ type Session struct {
 	downloadRateKB	float64
 	uploadRateKB	float64
 
-	pieceQueue 		[]*bundle.BlockInfo
-	pieceQueueMax 	int
+	blockQueue 		[]blockRequest
+	blockQueueMax 	int
 }
 
 // Exported
@@ -51,8 +56,8 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		maxPeers: 1,
 		downloadRateKB: 0,
 		uploadRateKB: 0,
-		pieceQueue: make([]*bundle.BlockInfo, 0),
-		pieceQueueMax: 50,
+		blockQueue: make([]blockRequest, 0),
+		blockQueueMax: 50,
 	}
 	session.tracker = tracker.New(tf.Announce, tf.InfoHash, listenPort, 0, 0, 0, peerID)
 	return &session, nil
@@ -99,17 +104,31 @@ func (session *Session) SetMaxUpRate(rateKB float64)  {
 
 func (session *Session) run() { 
 	if !session.bundle.Complete {
+		if len(session.blockQueue) < session.blockQueueMax {
+			session.fetchBlockInfos()
+		}
 		session.assignParts()
 	}
 }
 
 func (session *Session) assignParts() {
 	session.sortPeers()
+	blocksNeeded := make([]blockRequest, 0)
+	for _, bi := range session.blockQueue {
+		if !bi.sent {
+			blocksNeeded = append(blocksNeeded, bi)
+		}
+		
+	}
 }
 
-func (session *Session) getPartsNeeded() {
-	for len(session.pieceQueue) < session.pieceQueueMax {
-
+func (session *Session) fetchBlockInfos() {
+	if !session.bundle.Complete {
+		blocksNeeded := session.blockQueueMax - len(session.blockQueue)
+		addedBlocks := session.bundle.NextNBlocks(blocksNeeded)
+		for _, bi := range addedBlocks {
+			session.blockQueue = append(session.blockQueue, blockRequest{info: bi, sent: false}) 
+		}
 	}
 }
 

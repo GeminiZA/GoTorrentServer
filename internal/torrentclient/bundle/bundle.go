@@ -111,9 +111,9 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 	bundle.NumPieces = int64(len(bundle.Pieces))
 	if debugopts.BUNDLE_DEBUG {
 		fmt.Printf("Got pieces (%d)\n", bundle.NumPieces)
-		for i, piece := range bundle.Pieces {
-			fmt.Printf("Piece %d hash: %v\n", i, piece.hash)
-		}
+		//		for i, piece := range bundle.Pieces {
+		//fmt.Printf("Piece %d hash: %v\n", i, piece.hash)
+		//}
 	}
 
 	// bitfield
@@ -123,6 +123,9 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 	// Write files
 
 	for _, bundleFile := range bundle.Files {
+		if debugopts.BUNDLE_DEBUG {
+			fmt.Printf("Creating file: %s (%dMB)\n", bundleFile.Path, bundleFile.Length/1024/1024)
+		}
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
 			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0777)
 			if err != nil {

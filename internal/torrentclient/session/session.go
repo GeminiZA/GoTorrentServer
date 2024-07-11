@@ -13,51 +13,51 @@ import (
 )
 
 type blockRequest struct {
-	info 					*bundle.BlockInfo
-	sent 					bool
+	info *bundle.BlockInfo
+	sent bool
 }
 
 type Session struct {
-	bundle 			*bundle.Bundle
-	dbc 			*database.DBConn
-	tracker 		*tracker.Tracker
-	tf 				*torrentfile.TorrentFile
+	bundle  *bundle.Bundle
+	dbc     *database.DBConn
+	tracker *tracker.Tracker
+	tf      *torrentfile.TorrentFile
 
-	maxDownRateKB 	float64
-	maxUpRateKB 	float64
+	maxDownRateKB float64
+	maxUpRateKB   float64
 
-	peerIDList		[]string
-	peersMap		map[string]*peer.Peer
+	peerIDList []string
+	peersMap   map[string]*peer.Peer
 
-	listenPort 		int
-	peerID 			string
-	maxPeers		int
+	listenPort int
+	peerID     string
+	maxPeers   int
 
-	downloadRateKB	float64
-	uploadRateKB	float64
+	downloadRateKB float64
+	uploadRateKB   float64
 
-	blockQueue 		[]blockRequest
-	blockQueueMax 	int
+	blockQueue    []blockRequest
+	blockQueueMax int
 }
 
 // Exported
 
 func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, listenPort int, peerID string) (*Session, error) {
 	session := Session{
-		peerIDList: make([]string, 0),
-		peersMap: make(map[string]*peer.Peer),
-		bundle: bnd,
-		tf: tf,
-		dbc: dbc,
-		listenPort: listenPort,
-		peerID: peerID,
-		maxDownRateKB: 0,
-		maxUpRateKB: 0,
-		maxPeers: 1,
+		peerIDList:     make([]string, 0),
+		peersMap:       make(map[string]*peer.Peer),
+		bundle:         bnd,
+		tf:             tf,
+		dbc:            dbc,
+		listenPort:     listenPort,
+		peerID:         peerID,
+		maxDownRateKB:  0,
+		maxUpRateKB:    0,
+		maxPeers:       1,
 		downloadRateKB: 0,
-		uploadRateKB: 0,
-		blockQueue: make([]blockRequest, 0),
-		blockQueueMax: 50,
+		uploadRateKB:   0,
+		blockQueue:     make([]blockRequest, 0),
+		blockQueueMax:  50,
 	}
 	session.tracker = tracker.New(tf.Announce, tf.InfoHash, listenPort, 0, 0, 0, peerID)
 	return &session, nil
@@ -92,17 +92,17 @@ func (session *Session) Stop() {
 	}
 }
 
-func (session *Session) SetMaxDown(rateKB float64)  {
+func (session *Session) SetMaxDown(rateKB float64) {
 	session.maxDownRateKB = rateKB
 }
 
-func (session *Session) SetMaxUpRate(rateKB float64)  {
+func (session *Session) SetMaxUpRate(rateKB float64) {
 	session.maxUpRateKB = rateKB
 }
 
 // Internal
 
-func (session *Session) run() { 
+func (session *Session) run() {
 	if !session.bundle.Complete {
 		if len(session.blockQueue) < session.blockQueueMax {
 			session.fetchBlockInfos()
@@ -118,7 +118,6 @@ func (session *Session) assignParts() {
 		if !bi.sent {
 			blocksNeeded = append(blocksNeeded, bi)
 		}
-		
 	}
 }
 
@@ -127,7 +126,7 @@ func (session *Session) fetchBlockInfos() {
 		blocksNeeded := session.blockQueueMax - len(session.blockQueue)
 		addedBlocks := session.bundle.NextNBlocks(blocksNeeded)
 		for _, bi := range addedBlocks {
-			session.blockQueue = append(session.blockQueue, blockRequest{info: bi, sent: false}) 
+			session.blockQueue = append(session.blockQueue, blockRequest{info: bi, sent: false})
 		}
 	}
 }
@@ -138,12 +137,12 @@ func (session *Session) connectPeer(pi tracker.PeerInfo) error {
 		return errors.New("peer already connected")
 	}
 	peer, err := peer.Connect(
-		pi.PeerID, 
-		pi.IP, 
-		pi.Port, 
-		session.bundle.InfoHash, 
-		session.peerID, 
-		session.bundle.Bitfield, 
+		pi.PeerID,
+		pi.IP,
+		pi.Port,
+		session.bundle.InfoHash,
+		session.peerID,
+		session.bundle.Bitfield,
 		session.bundle.NumPieces,
 	)
 	if err != nil {
@@ -170,7 +169,7 @@ func (session *Session) disconnectPeer(peerID string) error {
 	}
 	if i == 0 {
 		session.peerID = session.peerID[1:]
-	} else if i == len(session.peerIDList) - 1 {
+	} else if i == len(session.peerIDList)-1 {
 		session.peerIDList = session.peerIDList[:len(session.peerIDList)-2]
 	} else {
 		session.peerIDList = append(session.peerIDList[0:i], session.peerIDList[i+1:]...)
@@ -197,3 +196,4 @@ func (session *Session) calcRates() {
 		session.uploadRateKB += peer.UploadRateKB
 	}
 }
+

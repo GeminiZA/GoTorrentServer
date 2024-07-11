@@ -1,5 +1,7 @@
 // Todo:
 // handle incoming peer connections
+// Change queues to be thread safe or just use channels
+
 package peer
 
 import (
@@ -19,113 +21,111 @@ import (
 const PEER_DEBUG = true
 
 type blockResponse struct {
-	PieceIndex 				uint32
-	BeginOffset 			uint32
-	Block 					[]byte
+	PieceIndex  uint32
+	BeginOffset uint32
+	Block       []byte
 }
 
 func (res blockResponse) EqualToReq(req blockRequest) bool {
 	return res.BeginOffset == uint32(req.info.BeginOffset) &&
-			res.PieceIndex == uint32(req.info.PieceIndex) &&
-			len(res.Block) == int(req.info.Length)
+		res.PieceIndex == uint32(req.info.PieceIndex) &&
+		len(res.Block) == int(req.info.Length)
 }
 
 func (resa blockResponse) Equal(resb blockResponse) bool {
 	return resa.BeginOffset == resb.BeginOffset &&
-			resa.PieceIndex == resb.PieceIndex &&
-			len(resa.Block) == len(resb.Block)
+		resa.PieceIndex == resb.PieceIndex &&
+		len(resa.Block) == len(resb.Block)
 }
 
 type blockRequest struct {
-	info 					bundle.BlockInfo
-	reqTime 				time.Time
-	sent 					bool
+	info    bundle.BlockInfo
+	reqTime time.Time
+	sent    bool
 }
 
 func (bra blockRequest) Equal(brb blockRequest) bool {
 	return bra.info.BeginOffset == brb.info.BeginOffset &&
-			bra.info.PieceIndex == brb.info.PieceIndex &&
-			bra.info.Length == brb.info.Length
+		bra.info.PieceIndex == brb.info.PieceIndex &&
+		bra.info.Length == brb.info.Length
 }
 
-
 type Peer struct {
-	//Info
-	remotePeerID 			string
-	peerID 					string
-	infoHash 				[]byte
-	bitField 				*bitfield.Bitfield
-	remoteBitfield 			*bitfield.Bitfield
-	numPieces 				int64
-	//Functional
-	conn 					net.Conn
-	timeLastReceived 		time.Time
-	timeLastSent	 		time.Time
-	mux						sync.Mutex
-	Connected				bool
-	Keepalive				bool
-	//State
-	amInterested 			bool
-	amChoking 				bool
-	remoteInterested 		bool
-	remoteChoking 			bool
-	//Queues
-	requestInQueue 			[]blockRequest
-	requestOutQueue 		[]blockRequest
-	responseInQueue 		[]blockResponse
-	responseOutQueue 		[]blockResponse
-	requestCancelledQueue 	[]blockRequest
-	//RateKB
-	TotalBytesUploaded 		int64
-	TotalBytesDownloaded	int64
-	bytesDownloaded			int64
-	bytesUploaded			int64
-	DownloadRateKB			float64
-	UploadRateKB			float64
-	lastDownloadUpdate 		time.Time
-	lastUploadUpdate 		time.Time
+	// Info
+	remotePeerID   string
+	peerID         string
+	infoHash       []byte
+	bitField       *bitfield.Bitfield
+	remoteBitfield *bitfield.Bitfield
+	numPieces      int64
+	// Functional
+	conn             net.Conn
+	timeLastReceived time.Time
+	timeLastSent     time.Time
+	mux              sync.Mutex
+	Connected        bool
+	Keepalive        bool
+	// State
+	amInterested     bool
+	amChoking        bool
+	remoteInterested bool
+	remoteChoking    bool
+	// Queues
+	requestInQueue        []blockRequest
+	requestOutQueue       []blockRequest
+	responseInQueue       []blockResponse
+	responseOutQueue      []blockResponse
+	requestCancelledQueue []blockRequest
+	// RateKB
+	TotalBytesUploaded   int64
+	TotalBytesDownloaded int64
+	bytesDownloaded      int64
+	bytesUploaded        int64
+	DownloadRateKB       float64
+	UploadRateKB         float64
+	lastDownloadUpdate   time.Time
+	lastUploadUpdate     time.Time
 }
 
 func Connect(
-		remotePeerID string, 
-		remoteIP string, 
-		remotePort int, 
-		infohash []byte, 
-		peerID string, 
-		bitfield *bitfield.Bitfield,
-		numPieces int64,
-	) (*Peer, error) {
-
+	remotePeerID string,
+	remoteIP string,
+	remotePort int,
+	infohash []byte,
+	peerID string,
+	bitfield *bitfield.Bitfield,
+	numPieces int64,
+) (*Peer, error) {
 	peer := Peer{
-		peerID: peerID,
-		remotePeerID: remotePeerID,
-		infoHash: infohash,
-		bitField: bitfield,
-		remoteBitfield: nil,
-		numPieces: numPieces,
+		peerID:           peerID,
+		remotePeerID:     remotePeerID,
+		infoHash:         infohash,
+		bitField:         bitfield,
+		remoteBitfield:   nil,
+		numPieces:        numPieces,
 		timeLastReceived: time.Now(),
-		timeLastSent: time.Now(),
-		Connected: false,
-		Keepalive: false,
-		amInterested: false,
-		amChoking: true,
+		timeLastSent:     time.Now(),
+		Connected:        false,
+		Keepalive:        false,
+		amInterested:     false,
+		amChoking:        true,
 		remoteInterested: false,
-		remoteChoking: true,
+		remoteChoking:    true,
 		// Queues
-		requestInQueue: make([]blockRequest, 0),
-		requestOutQueue: make([]blockRequest, 0),
-		responseOutQueue: make([]blockResponse, 0),
-		responseInQueue: make([]blockResponse, 0),
+		requestInQueue:        make([]blockRequest, 0),
+		requestOutQueue:       make([]blockRequest, 0),
+		responseOutQueue:      make([]blockResponse, 0),
+		responseInQueue:       make([]blockResponse, 0),
 		requestCancelledQueue: make([]blockRequest, 0),
 		// RateKBs
-		lastDownloadUpdate: time.Now(),
-		lastUploadUpdate: time.Now(),
-		bytesUploaded: 0,
-		bytesDownloaded: 0,
-		TotalBytesUploaded: 0,
+		lastDownloadUpdate:   time.Now(),
+		lastUploadUpdate:     time.Now(),
+		bytesUploaded:        0,
+		bytesDownloaded:      0,
+		TotalBytesUploaded:   0,
 		TotalBytesDownloaded: 0,
-		DownloadRateKB: 0,
-		UploadRateKB: 0,
+		DownloadRateKB:       0,
+		UploadRateKB:         0,
 	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", remoteIP, remotePort))
@@ -166,8 +166,8 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	defer peer.mux.Unlock()
 
 	newReq := blockRequest{
-		info: bi,
-		sent: false,
+		info:    bi,
+		sent:    false,
 		reqTime: time.Time{},
 	}
 	for _, req := range peer.requestOutQueue {
@@ -182,7 +182,7 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 func (peer *Peer) GetRequestIn() *blockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
-	
+
 	for _, req := range peer.requestInQueue {
 		if !req.sent {
 			return &req
@@ -196,9 +196,9 @@ func (peer *Peer) QueueResponseOut(pieceIndex int64, beginOffset int64, block []
 	defer peer.mux.Unlock()
 
 	newRes := blockResponse{
-		PieceIndex: uint32(pieceIndex),
+		PieceIndex:  uint32(pieceIndex),
 		BeginOffset: uint32(beginOffset),
-		Block: block,
+		Block:       block,
 	}
 
 	exists := false
@@ -263,7 +263,7 @@ func (peer *Peer) Choke() error {
 func (peer *Peer) Unchoke() error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
-	if !peer.Connected ||  !peer.amChoking {
+	if !peer.Connected || !peer.amChoking {
 		return nil
 	}
 	err := peer.sendUnchoke()
@@ -275,8 +275,8 @@ func (peer *Peer) CancelRequest(bi *bundle.BlockInfo) error {
 	defer peer.mux.Unlock()
 
 	newReq := blockRequest{
-		info: *bi,
-		sent: false,
+		info:    *bi,
+		sent:    false,
 		reqTime: time.Time{},
 	}
 
@@ -315,10 +315,9 @@ func (peer *Peer) run() {
 			break
 		}
 
-		if len(peer.requestOutQueue) == 0 {
-			peer.sendNotInterested()
-		}
-
+		//if len(peer.requestOutQueue) == 0 {
+		//peer.sendNotInterested()
+		//}
 
 		// Process messages in
 		msgIn, err := peer.readMessage()
@@ -372,7 +371,7 @@ func (peer *Peer) run() {
 
 		i := 0
 		for i < len(peer.requestOutQueue) {
-			if peer.requestOutQueue[i].sent && time.Now().After(peer.requestOutQueue[i].reqTime.Add(BLOCK_REQUEST_TIMEOUT_MS * time.Millisecond)) {
+			if peer.requestOutQueue[i].sent && time.Now().After(peer.requestOutQueue[i].reqTime.Add(BLOCK_REQUEST_TIMEOUT_MS*time.Millisecond)) {
 				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
 				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
 				continue
@@ -475,14 +474,14 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		}
 		peer.mux.Lock()
 		newReq := blockRequest{
-						info: bundle.BlockInfo{
-							PieceIndex: int64(msg.Index), 
-							BeginOffset: int64(msg.Begin),
-							Length: int64(msg.Length),
-						},
-						reqTime: time.Now(),
-						sent: false,
-					}
+			info: bundle.BlockInfo{
+				PieceIndex:  int64(msg.Index),
+				BeginOffset: int64(msg.Begin),
+				Length:      int64(msg.Length),
+			},
+			reqTime: time.Now(),
+			sent:    false,
+		}
 		// Move to back of queue
 		i := 0
 		for i < len(peer.requestInQueue) {
@@ -498,16 +497,16 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.mux.Lock()
 		peer.bytesDownloaded += int64(len(msg.Piece))
 		newRes := blockResponse{
-			PieceIndex: msg.Index,
+			PieceIndex:  msg.Index,
 			BeginOffset: msg.Begin,
-			Block: msg.Piece,
+			Block:       msg.Piece,
 		}
 		i := 0
 		found := false
 		for i < len(peer.requestOutQueue) {
 			if newRes.EqualToReq(peer.requestOutQueue[i]) {
 				found = true
-				//Remove from out queue
+				// Remove from out queue
 				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
 				break
 			}
@@ -522,11 +521,11 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.mux.Lock()
 		req := blockRequest{
 			info: bundle.BlockInfo{
-				PieceIndex: int64(msg.Index),
+				PieceIndex:  int64(msg.Index),
 				BeginOffset: int64(msg.Begin),
-				Length: int64(msg.Length),
+				Length:      int64(msg.Length),
 			},
-			sent: false,
+			sent:    false,
 			reqTime: time.Time{},
 		}
 		i := 0
@@ -617,7 +616,7 @@ func (peer *Peer) sendPiece(res blockResponse) error {
 			break
 		}
 	}
-	//Piece probably cancelled
+	// Piece probably cancelled
 	if !found {
 		return nil
 	}

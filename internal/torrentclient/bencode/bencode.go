@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 )
 
@@ -19,13 +20,12 @@ const (
 )
 
 type Token struct {
-	Type TokenType
+	Type  TokenType
 	Value []byte
 }
 
-
 func Tokenize(data *[]byte) ([]Token, error) {
-	//fmt.Printf("Tokenizing file\n")
+	// fmt.Printf("Tokenizing file\n")
 	curContainers := []Token{}
 	tokens := []Token{}
 	i := 0
@@ -39,7 +39,7 @@ func Tokenize(data *[]byte) ([]Token, error) {
 		} else if (*data)[i] == 'i' {
 			i++
 			newInt := Token{Type: INTEGER, Value: []byte{}}
-			for ((*data)[i] != 'e') {
+			for (*data)[i] != 'e' {
 				newInt.Value = append(newInt.Value, (*data)[i])
 				i++
 			}
@@ -47,19 +47,19 @@ func Tokenize(data *[]byte) ([]Token, error) {
 		} else if (*data)[i] == 'e' {
 			if len(curContainers) > 0 && curContainers[len(curContainers)-1].Type == DICTIONARY {
 				tokens = append(tokens, Token{Type: END_OF_DICTIONARY, Value: []byte{}})
-				curContainers = curContainers[:len(curContainers) - 1]
+				curContainers = curContainers[:len(curContainers)-1]
 			} else if len(curContainers) > 0 && curContainers[len(curContainers)-1].Type == LIST {
 				tokens = append(tokens, Token{Type: END_OF_LIST, Value: []byte{}})
-				curContainers = curContainers[:len(curContainers) - 1]
-			} 
-		} else { //byte string
+				curContainers = curContainers[:len(curContainers)-1]
+			}
+		} else { // byte string
 			newString := Token{Type: STRING, Value: []byte{}}
 			if (*data)[i] < '0' || (*data)[i] > '9' {
 				return nil, errors.New("invalid byte in data")
 			}
 			stringLength := 0
 			for i < len((*data)) && (*data)[i] != ':' {
-				stringLength = stringLength*10
+				stringLength = stringLength * 10
 				stringLength += int((*data)[i] - '0')
 				i++
 			}
@@ -97,7 +97,6 @@ func PrintToken(token Token) {
 		fmt.Printf("{%s}", typeString)
 	}
 }
-
 
 func PrintTokens(tokens []Token) {
 	for i := range tokens {
@@ -143,11 +142,11 @@ func ParseInteger(token Token) (int64, error) {
 
 func ParseList(tokens []Token) ([]interface{}, error) {
 	var list []interface{}
-	if tokens[0].Type != LIST || tokens[len(tokens) - 1].Type != END_OF_LIST {
+	if tokens[0].Type != LIST || tokens[len(tokens)-1].Type != END_OF_LIST {
 		return nil, errors.New("invalid list form")
 	}
 	i := 1
-	for i < len(tokens) - 1 {
+	for i < len(tokens)-1 {
 		switch tokens[i].Type {
 		case STRING:
 			item, err := ParseString(tokens[i])
@@ -165,7 +164,7 @@ func ParseList(tokens []Token) ([]interface{}, error) {
 			listStart := i
 			listCount := 1
 			i++
-			for i < len(tokens) - 1 && listCount > 0 {
+			for i < len(tokens)-1 && listCount > 0 {
 				switch tokens[i].Type {
 				case LIST:
 					listCount++
@@ -175,7 +174,7 @@ func ParseList(tokens []Token) ([]interface{}, error) {
 				i++
 			}
 			i--
-			item, err := ParseList(tokens[listStart:i + 1])
+			item, err := ParseList(tokens[listStart : i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -184,7 +183,7 @@ func ParseList(tokens []Token) ([]interface{}, error) {
 			dictStart := i
 			dictCount := 1
 			i++
-			for i < len(tokens) - 1 && dictCount > 0 {
+			for i < len(tokens)-1 && dictCount > 0 {
 				switch tokens[i].Type {
 				case DICTIONARY:
 					dictCount++
@@ -194,7 +193,7 @@ func ParseList(tokens []Token) ([]interface{}, error) {
 				i++
 			}
 			i--
-			item, err := ParseDict(tokens[dictStart:i + 1])
+			item, err := ParseDict(tokens[dictStart : i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -207,11 +206,11 @@ func ParseList(tokens []Token) ([]interface{}, error) {
 
 func ParseDict(tokens []Token) (map[string]interface{}, error) {
 	dict := make(map[string]interface{})
-	if tokens[0].Type != DICTIONARY || tokens[len(tokens) - 1].Type != END_OF_DICTIONARY {
+	if tokens[0].Type != DICTIONARY || tokens[len(tokens)-1].Type != END_OF_DICTIONARY {
 		return nil, errors.New("invalid dictionary form")
 	}
 	i := 1
-	for i < len(tokens) - 1 {
+	for i < len(tokens)-1 {
 		if tokens[i].Type != STRING {
 			return nil, fmt.Errorf("key not string token_index: %d", i)
 		}
@@ -222,7 +221,7 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 			listStart := i
 			listCount := 1
 			i++
-			for i < len(tokens) - 1 && listCount > 0 {
+			for i < len(tokens)-1 && listCount > 0 {
 				switch tokens[i].Type {
 				case LIST:
 					listCount++
@@ -232,7 +231,7 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 				i++
 			}
 			i--
-			item, err := ParseList(tokens[listStart: i + 1])
+			item, err := ParseList(tokens[listStart : i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -241,7 +240,7 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 			dictStart := i
 			dictCount := 1
 			i++
-			for i < len(tokens) - 1 && dictCount > 0 {
+			for i < len(tokens)-1 && dictCount > 0 {
 				switch tokens[i].Type {
 				case DICTIONARY:
 					dictCount++
@@ -251,7 +250,7 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 				i++
 			}
 			i--
-			item, err := ParseDict(tokens[dictStart: i + 1])
+			item, err := ParseDict(tokens[dictStart : i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -322,8 +321,14 @@ func bEncodeList(list []interface{}) (string, error) {
 
 func BEncode(dict map[string]interface{}) (string, error) {
 	bString := "d"
-	for key, value := range dict {
+	keys := make([]string, 0)
+	for k := range dict {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
 		bString += bEncodeString(key)
+		value := dict[key]
 		switch v := value.(type) {
 		case string:
 			bString += bEncodeString(v)
@@ -348,14 +353,14 @@ func BEncode(dict map[string]interface{}) (string, error) {
 }
 
 func GetInfoHash(data *[]byte) ([]byte, error) {
-	//fmt.Println("Getting info hash...")
+	// fmt.Println("Getting info hash...")
 	sData := (*data)
 	i := 0
 	searchStr := "4:infod"
-	curStr := string(sData[i:i+7])
-	for i < len(sData) - 7 && curStr != searchStr{
+	curStr := string(sData[i : i+7])
+	for i < len(sData)-7 && curStr != searchStr {
 		i++
-		curStr = string(sData[i:i+7])
+		curStr = string(sData[i : i+7])
 	}
 	dictStart := i + 6
 	contCount := 1
@@ -392,10 +397,11 @@ func GetInfoHash(data *[]byte) ([]byte, error) {
 			i++
 		}
 	}
-	//fmt.Printf("info start: %d, info end: %d\n", dictStart, i)
-	sInfo := sData[dictStart: i]
+	// fmt.Printf("info start: %d, info end: %d\n", dictStart, i)
+	sInfo := sData[dictStart:i]
 	hasher := sha1.New()
 	hasher.Write([]byte(sInfo))
 	infoHash := hasher.Sum(nil)
 	return infoHash, nil
 }
+

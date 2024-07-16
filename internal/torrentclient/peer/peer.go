@@ -70,6 +70,8 @@ type Peer struct {
 	remoteInterested bool
 	remoteChoking    bool
 	// Queues
+	RequestOutMax         int
+	ResponseOutMax        int
 	requestInQueue        []BlockRequest
 	requestOutQueue       []BlockRequest
 	responseInQueue       []BlockResponse
@@ -111,6 +113,8 @@ func Connect(
 		remoteInterested: false,
 		remoteChoking:    true,
 		// Queues
+		ResponseOutMax:        2,
+		RequestOutMax:         2,
 		requestInQueue:        make([]BlockRequest, 0),
 		requestOutQueue:       make([]BlockRequest, 0),
 		responseOutQueue:      make([]BlockResponse, 0),
@@ -162,6 +166,14 @@ func (peer *Peer) Close() {
 }
 
 // Exported Interface
+
+func (peer *Peer) NumRequestsCanAdd() int {
+	return peer.RequestOutMax - len(peer.requestOutQueue)
+}
+
+func (peer *Peer) NumResponsesCanAdd() int {
+	return peer.ResponseOutMax - len(peer.responseOutQueue)
+}
 
 func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	peer.mux.Lock()
@@ -223,6 +235,18 @@ func (peer *Peer) QueueResponseOut(pieceIndex int64, beginOffset int64, block []
 
 	peer.responseOutQueue = append(peer.responseOutQueue, newRes)
 	return nil
+}
+
+func (peer *Peer) HasResponsesIn() bool {
+	return len(peer.responseInQueue) != 0
+}
+
+func (peer *Peer) HashRequestsIn() bool {
+	return len(peer.requestInQueue) != 0
+}
+
+func (peer *Peer) HasRequestsCancelled() bool {
+	return len(peer.requestCancelledQueue) != 0
 }
 
 func (peer *Peer) GetResponseIn() *BlockResponse {
@@ -353,6 +377,7 @@ func (peer *Peer) run() {
 							if err != nil {
 								fmt.Println("Error sending request to peer: ", err)
 							}
+							peer.requestOutQueue[i].sent = true
 						}
 					}
 				}
@@ -537,6 +562,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			return nil
 		}
 		peer.responseInQueue = append(peer.responseInQueue, newRes)
+		fmt.Printf("Response added to responseInQueue\n")
 		peer.mux.Unlock()
 	case message.CANCEL:
 		peer.mux.Lock()
@@ -575,7 +601,7 @@ func (peer *Peer) sendMessage(msg *message.Message) error {
 	const MESSAGE_SEND_TIMEOUT = 1000
 	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sending msg to peer(%s): ", peer.peerID)
+		fmt.Printf("Sending msg to peer(%s): ", peer.RemotePeerID)
 		msg.Print()
 	}
 	msgBytes := msg.GetBytes()
@@ -698,7 +724,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 		bytesRead += n
 		msgBytes = append(msgBytes, buf[0:n]...)
 	}
-	fmt.Printf("Message bytes read: \n %x\n", msgBytes)
+	// fmt.Printf("Message bytes read: \n %x\n", msgBytes)
 	msg, err := message.ParseMessage(msgBytes)
 	if err != nil {
 		return nil, err

@@ -67,6 +67,9 @@ func TestPeer(tfPath string, myPeerID string) {
 	defer trk.Stop()
 	var curPeer *peer.Peer
 	for _, peerDetails := range trk.Peers {
+		if peerDetails.PeerID == myPeerID {
+			continue
+		}
 		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.PeerID)
 		curPeer, err = peer.Connect(
 			peerDetails.PeerID,
@@ -88,19 +91,30 @@ func TestPeer(tfPath string, myPeerID string) {
 	if curPeer.Connected {
 		time.Sleep(2 * time.Second)
 		start := time.Now()
-		for time.Now().After(start.Add(10 * time.Second)) {
-			nextBlocks := bdl.NextNBlocks(1)
-			fmt.Printf("Blockinfo to request: %v\n", nextBlocks)
+		for start.Add(10 * time.Second).After(time.Now()) {
+			numBlocksNeeded := curPeer.NumRequestsCanAdd()
+			nextBlocks := bdl.NextNBlocks(numBlocksNeeded)
+			fmt.Println("Blocks to be requested:")
+			for _, block := range nextBlocks {
+				fmt.Printf("(%d, %d, %d)\n", block.PieceIndex, block.BeginOffset, block.Length)
+			}
 			for _, blockinfo := range nextBlocks {
+				fmt.Printf("Queuing request: (%d, %d, %d)\n", blockinfo.PieceIndex, blockinfo.BeginOffset, blockinfo.Length)
 				curPeer.QueueRequestOut(*blockinfo)
 			}
 			curResp := curPeer.GetResponseIn()
-			for curResp == nil {
-				time.Sleep(50 * time.Millisecond)
-				curPeer.GetResponseIn()
+			for curResp != nil {
+				fmt.Printf("Got response in main: Index: %d, Offset: %d\n", curResp.PieceIndex, curResp.BeginOffset)
+				err = bdl.WriteBlock(int64(curResp.PieceIndex), int64(curResp.BeginOffset), curResp.Block)
+				if err != nil {
+					fmt.Printf("Error writing block (%d, %d): %v", curResp.PieceIndex, curResp.BeginOffset, err)
+				}
+				curResp = curPeer.GetResponseIn()
 			}
-			fmt.Printf("Got response in main: Index: %d, Offset: %d\n", curResp.PieceIndex, curResp.BeginOffset)
+			time.Sleep(time.Millisecond * 500)
+			// Try write to bundle
 		}
-		time.Sleep(2 * time.Second)
+	} else {
+		fmt.Println("Peer not connected")
 	}
 }

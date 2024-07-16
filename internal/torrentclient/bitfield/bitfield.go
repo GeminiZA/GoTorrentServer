@@ -7,16 +7,16 @@ import (
 )
 
 type Bitfield struct {
-	Bytes []byte
-	len int64
-	Full bool
+	Bytes  []byte
+	len    int64
+	Full   bool
 	NumSet int64
 }
 
 func FromBytes(bytes []byte, len int64) *Bitfield {
 	bf := Bitfield{Bytes: bytes, len: len}
 	bf.Full = bf.Complete()
-	for _, b := range bytes { //Count on bits
+	for _, b := range bytes { // Count on bits
 		if b == 0xFF {
 			bf.NumSet += 8
 		} else {
@@ -76,8 +76,8 @@ func (bf *Bitfield) FirstOff() int64 {
 	for i := range bf.Bytes {
 		if bf.Bytes[i] != 0xFF {
 			for j := 0; j < 8; j++ {
-				if (bf.Bytes[i] & (1 << (7 - j)))  == 0 {
-					return int64(i * 8) + int64(j)
+				if (bf.Bytes[i] & (1 << (7 - j))) == 0 {
+					return int64(i*8) + int64(j)
 				}
 			}
 		}
@@ -134,6 +134,23 @@ func (bfA *Bitfield) Equals(bfB *Bitfield) bool {
 	return true
 }
 
+func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
+	if bfA.len != bfB.len {
+		return false
+	}
+	for i := range bfA.Bytes {
+		if bfA.Bytes[i] == bfB.Bytes[i] {
+			continue
+		} else {
+			for j := 0; j < 8; j++ {
+				if ((1 & (bfB.Bytes[i] >> j)) == 1) && ((1 & (bfA.Bytes[i] >> j)) != 1) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
 
 func (bf *Bitfield) Print() {
 	for _, b := range bf.Bytes {
@@ -141,3 +158,4 @@ func (bf *Bitfield) Print() {
 	}
 	fmt.Println()
 }
+

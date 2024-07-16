@@ -290,6 +290,9 @@ func (bundle *Bundle) NextNBlocks(numBlocks int) []*BlockInfo {
 				})
 			}
 			blockByteOffset += block.Length
+			if len(retBlocks) == numBlocks {
+				break
+			}
 		}
 		if len(retBlocks) == numBlocks {
 			break

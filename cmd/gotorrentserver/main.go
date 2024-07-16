@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
@@ -27,9 +28,6 @@ func main() {
 					panic("in peer test no torrent file specified")
 				}
 				TestPeer(os.Args[4], "TESTID12321232123212")
-
-				fmt.Println("Bundle created succesfully")
-
 			} else if testPkg == "session" {
 				// Session tests
 			} else {
@@ -67,8 +65,10 @@ func TestPeer(tfPath string, myPeerID string) {
 		fmt.Printf("Error starting tracker: %v\n", err)
 	}
 	defer trk.Stop()
+	var curPeer *peer.Peer
 	for _, peerDetails := range trk.Peers {
-		peer, err := peer.Connect(
+		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.PeerID)
+		curPeer, err = peer.Connect(
 			peerDetails.PeerID,
 			peerDetails.IP,
 			peerDetails.Port,
@@ -82,7 +82,25 @@ func TestPeer(tfPath string, myPeerID string) {
 			continue
 		}
 		fmt.Printf("Succesfully connected to peer (%s)\n", peerDetails.PeerID)
-		defer peer.Close()
+		defer curPeer.Close()
+		break
 	}
-	fmt.Println("Peer test complete")
+	if curPeer.Connected {
+		time.Sleep(2 * time.Second)
+		start := time.Now()
+		for time.Now().After(start.Add(10 * time.Second)) {
+			nextBlocks := bdl.NextNBlocks(1)
+			fmt.Printf("Blockinfo to request: %v\n", nextBlocks)
+			for _, blockinfo := range nextBlocks {
+				curPeer.QueueRequestOut(*blockinfo)
+			}
+			curResp := curPeer.GetResponseIn()
+			for curResp == nil {
+				time.Sleep(50 * time.Millisecond)
+				curPeer.GetResponseIn()
+			}
+			fmt.Printf("Got response in main: Index: %d, Offset: %d\n", curResp.PieceIndex, curResp.BeginOffset)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }

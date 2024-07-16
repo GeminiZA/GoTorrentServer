@@ -159,10 +159,10 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 	return &msg, nil
 }
 
-func ParseMessage(bytes []byte) (*Message, error) {
+func ParseMessage(msgBytes []byte) (*Message, error) {
 	const MAX_MESSAGE_LENGTH = 17 * 1024
 
-	msgLen := len(bytes)
+	msgLen := len(msgBytes)
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")
@@ -170,7 +170,6 @@ func ParseMessage(bytes []byte) (*Message, error) {
 	if msgLen == 0 {
 		return &Message{Type: KEEP_ALIVE}, nil
 	}
-	msgBytes := make([]byte, 0)
 	msgID := msgBytes[0]
 	switch msgID {
 	case 0: // choke
@@ -294,4 +293,3 @@ func NewCancel(bi *bundle.BlockInfo) *Message {
 func NewPort(port uint32) *Message {
 	return &Message{Type: PORT, Port: port}
 }
-

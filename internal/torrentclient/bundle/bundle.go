@@ -84,6 +84,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		bundle.Files = []*BundleFile{bundleFile}
 		totalLength = metaData.Info.Length
 	}
+	bundle.Length = totalLength
 	if debugopts.BUNDLE_DEBUG {
 		fmt.Println("Got files...")
 		for _, file := range bundle.Files {
@@ -124,7 +125,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	for _, bundleFile := range bundle.Files {
 		if debugopts.BUNDLE_DEBUG {
-			fmt.Printf("Creating file: %s (%dMB)\n", bundleFile.Path, bundleFile.Length/1024/1024)
+			fmt.Printf("Creating file: %s (%fMB)\n", bundleFile.Path, float64(bundleFile.Length)/1024/1024)
 		}
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
 			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0777)
@@ -305,4 +306,3 @@ func (bundle *Bundle) PrintStatus() {
 	fmt.Printf("Bundle status: \n")
 	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
 }
-

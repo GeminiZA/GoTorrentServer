@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
@@ -15,29 +17,31 @@ const DEBUG_TRACKER bool = true
 
 type PeerInfo struct {
 	PeerID string
-	IP string
-	Port int
+	IP     string
+	Port   int
 }
 
 type Tracker struct {
 	instantiated bool
-	started bool
-	TrackerUrl string
-	InfoHash   []byte
-	Port       int
-	TrackerID  string
-	Downloaded int64
-	Uploaded   int64
-	Left       int64
-	PeerID     string
-	Interval   int64
-	MinInterval int64
-	Seeders int64
-	Leechers int64
-	Peers []PeerInfo
+	TrackerUrl   string
+	InfoHash     []byte
+	Port         int
+	TrackerID    string
+	Downloaded   int64
+	Uploaded     int64
+	Left         int64
+	PeerID       string
+	Interval     time.Duration
+	MinInterval  time.Duration
+	Seeders      int64
+	Leechers     int64
+	Peers        []PeerInfo
+	running      bool
+	lastAnnounce time.Time
+	mux          sync.Mutex
 }
 
-func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) (*Tracker) {
+func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
 	tracker := Tracker{}
 	tracker.InfoHash = infoHash
 	tracker.TrackerUrl = trackerUrl
@@ -50,7 +54,7 @@ func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploade
 	tracker.Seeders = 0
 	tracker.Leechers = 0
 	tracker.instantiated = true
-	tracker.started = false
+	tracker.running = false
 	return &tracker
 }
 
@@ -71,7 +75,8 @@ func (tracker *Tracker) parseBody(body []byte) error {
 	}
 	if interval, ok := bodyDict["interval"]; ok {
 		if intervalStr, ok := interval.(string); ok {
-			tracker.Interval, err = strconv.ParseInt(intervalStr, 10, 64)
+			intervalInt, err := strconv.ParseInt(intervalStr, 10, 64)
+			tracker.Interval = time.Duration(intervalInt) * time.Second
 			if err != nil {
 				return err
 			}
@@ -81,17 +86,20 @@ func (tracker *Tracker) parseBody(body []byte) error {
 	}
 	if minInterval, ok := bodyDict["min interval"]; ok {
 		if intervalStr, ok := minInterval.(string); ok {
-			tracker.MinInterval, err = strconv.ParseInt(intervalStr, 10, 64)
+			minIntervalInt, err := strconv.ParseInt(intervalStr, 10, 64)
+			tracker.MinInterval = time.Duration(minIntervalInt) * time.Second
 			if err != nil {
 				return err
 			}
 		}
+	} else {
+		tracker.MinInterval = tracker.Interval - time.Second*5
 	}
 	if trackerID, ok := bodyDict["tracker id"]; ok {
 		if trackerIDStr, ok := trackerID.(string); ok {
 			tracker.TrackerID = trackerIDStr
 		}
-	} 
+	}
 	if complete, ok := bodyDict["complete"]; ok {
 		if completeStr, ok := complete.(string); ok {
 			tracker.Seeders, err = strconv.ParseInt(completeStr, 10, 64)
@@ -146,6 +154,23 @@ func (tracker *Tracker) Start() error {
 	if !tracker.instantiated {
 		return errors.New("tracker incorrectly instantiated")
 	}
+
+	err := tracker.start()
+	if err != nil {
+		return err
+	}
+
+	tracker.running = true
+
+	go tracker.run()
+
+	return nil
+}
+
+func (tracker *Tracker) start() error {
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
 	params := url.Values{}
 	params.Add("info_hash", string(tracker.InfoHash))
 	params.Add("peer_id", tracker.PeerID)
@@ -157,7 +182,6 @@ func (tracker *Tracker) Start() error {
 	params.Add("event", "started")
 
 	res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
-
 	if err != nil {
 		return err
 	}
@@ -182,13 +206,15 @@ func (tracker *Tracker) Start() error {
 		return err
 	}
 
-	tracker.started = true
 	return nil
 }
 
 func (tracker *Tracker) Complete() error {
-	if !tracker.started {
-		return errors.New("tracker not started")
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
+	if !tracker.running {
+		return errors.New("tracker not running")
 	}
 
 	params := url.Values{}
@@ -202,7 +228,6 @@ func (tracker *Tracker) Complete() error {
 	params.Add("event", "complete")
 
 	res, err := http.Get(fmt.Sprintf("%s:%s", tracker.TrackerUrl, params.Encode()))
-
 	if err != nil {
 		return err
 	}
@@ -222,9 +247,14 @@ func (tracker *Tracker) Complete() error {
 }
 
 func (tracker *Tracker) Stop() error {
-	if !tracker.started {
-		return errors.New("tracker not started")
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
+	if !tracker.running {
+		return errors.New("tracker not running")
 	}
+
+	tracker.running = false
 
 	params := url.Values{}
 	params.Add("info_hash", string(tracker.InfoHash))
@@ -237,7 +267,6 @@ func (tracker *Tracker) Stop() error {
 	params.Add("event", "stopped")
 
 	res, err := http.Get(fmt.Sprintf("%s:%s", tracker.TrackerUrl, params.Encode()))
-
 	if err != nil {
 		return err
 	}
@@ -245,3 +274,19 @@ func (tracker *Tracker) Stop() error {
 
 	return nil
 }
+
+func (tracker *Tracker) run() {
+	for tracker.running {
+		time.Sleep(time.Second)
+		if tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
+			err := tracker.start()
+			if err != nil {
+				fmt.Printf("Error in tracker running: %v\n", err)
+			} else {
+				fmt.Printf("Tracker reannounced...\n")
+			}
+		}
+	}
+	fmt.Printf("Tracker stopped...\n")
+}
+

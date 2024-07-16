@@ -5,4 +5,5 @@ const (
 	BUNDLE_DEBUG       = true
 	PEER_DEBUG         = true
 	SESSION_DEBUG      = true
+	MESSAGE_DEBUG      = true
 )

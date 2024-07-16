@@ -13,12 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 )
-
-const PEER_DEBUG = true
 
 type blockResponse struct {
 	PieceIndex  uint32
@@ -301,6 +300,8 @@ func (peer *Peer) Have(pieceIndex int64) error {
 }
 
 func (peer *Peer) run() {
+	// Read bitfield
+
 	const BLOCK_REQUEST_TIMEOUT_MS = 5000
 	for peer.Connected {
 		peer.UpdateRates()
@@ -323,10 +324,11 @@ func (peer *Peer) run() {
 		msgIn, err := peer.readMessage()
 		if err != nil {
 			fmt.Println("Error reading message from peer: ", err)
-		}
-		err = peer.handleMessageIn(msgIn)
-		if err != nil {
-			fmt.Println("Error handling message from peer: ", err)
+		} else {
+			err = peer.handleMessageIn(msgIn)
+			if err != nil {
+				fmt.Println("Error handling message from peer: ", err)
+			}
 		}
 
 		// Process messages out
@@ -419,7 +421,10 @@ func (peer *Peer) readHandshake() error {
 	if err != nil {
 		return err
 	}
-	if peer.peerID != handshakeMsg.PeerID {
+	if debugopts.PEER_DEBUG {
+		fmt.Printf("Handshake complete, remoteID: %s\n", handshakeMsg.PeerID)
+	}
+	if peer.remotePeerID != handshakeMsg.PeerID {
 		return errors.New("peerID mismatch")
 	}
 	if !bytes.Equal(peer.infoHash, handshakeMsg.InfoHash) {
@@ -553,7 +558,7 @@ func (peer *Peer) sendMessage(msg *message.Message) error {
 	}
 	const MESSAGE_SEND_TIMEOUT = 1000
 	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
-	if PEER_DEBUG {
+	if debugopts.PEER_DEBUG {
 		fmt.Printf("Sending msg to peer(%s): ", peer.peerID)
 		msg.Print()
 	}
@@ -645,31 +650,37 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if !peer.Connected {
 		return nil, nil
 	}
-	const MESSAGE_READ_TIMEOUT = 1000
+	const MESSAGE_READ_TIMEOUT_MS = 1000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
 	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT * time.Millisecond))
+	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
 	n, err := peer.conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
 	}
 	if n != 4 {
-		return nil, errors.New("malformed message length read")
+		return nil, fmt.Errorf("malformed message length read: 0x%x", msgLenBytes)
 	}
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
 		return nil, errors.New("message length exceeds max of 17kb")
 	}
+	if debugopts.PEER_DEBUG {
+		fmt.Printf("Message Length read: %d (0x%x)\n", msgLen, msgLenBytes)
+	}
 	if msgLen == 0 {
 		return message.NewKeepAlive(), nil
 	}
 	msgBytes := make([]byte, 0)
-	n, err = peer.conn.Read(msgBytes)
-	if err != nil {
-		return nil, err
-	}
-	if n != msgLen {
-		return nil, errors.New("incomplete message read")
+	bytesRead := 0
+	for len(msgBytes) < msgLen {
+		buf := make([]byte, (msgLen - bytesRead))
+		n, err = peer.conn.Read(buf)
+		if err != nil {
+			return nil, err
+		}
+		bytesRead += n
+		msgBytes = append(msgBytes, buf[0:n]...)
 	}
 	msg, err := message.ParseMessage(msgBytes)
 	if err != nil {

@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
-
-const DEBUG_MESSAGE bool = false
 
 const READ_TIMEOUT_MS = 500
 
@@ -25,19 +24,19 @@ const (
 	REQUEST
 	PIECE
 	CANCEL
-	PORT //for DHT
+	PORT // for DHT
 	HANDSHAKE
 )
 
 type Message struct {
-	Type MessageType
-	Index uint32
-	Length uint32
+	Type     MessageType
+	Index    uint32
+	Length   uint32
 	BitField []byte
-	Begin uint32
-	Piece []byte
-	Port uint32
-	PeerID string
+	Begin    uint32
+	Piece    []byte
+	Port     uint32
+	PeerID   string
 	InfoHash []byte
 	Reserved []byte
 }
@@ -113,7 +112,7 @@ func (m *Message) GetBytes() []byte {
 	case PORT:
 		portBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(portBytes, m.Port)
-		ret := []byte{0,0,0,3,9}
+		ret := []byte{0, 0, 0, 3, 9}
 		ret = append(ret, portBytes...)
 		return ret
 	case HANDSHAKE:
@@ -145,7 +144,16 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 	if pstr != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
-	msg.Reserved = bytes[20 : 28]
+	if debugopts.MESSAGE_DEBUG {
+		handshakeBytes := make([]byte, 0)
+		handshakeBytes = append(handshakeBytes, pstrlen)
+		handshakeBytes = append(handshakeBytes, []byte(pstr)...)
+		handshakeBytes = append(handshakeBytes, bytes[20:28]...)
+		handshakeBytes = append(handshakeBytes, bytes[28:48]...)
+		handshakeBytes = append(handshakeBytes, bytes[48:68]...)
+		fmt.Printf("Got handshake: \nHex: %x\nString: %s\n", handshakeBytes, string(handshakeBytes))
+	}
+	msg.Reserved = bytes[20:28]
 	msg.InfoHash = bytes[28:48]
 	msg.PeerID = string(bytes[48:68])
 	return &msg, nil
@@ -286,3 +294,4 @@ func NewCancel(bi *bundle.BlockInfo) *Message {
 func NewPort(port uint32) *Message {
 	return &Message{Type: PORT, Port: port}
 }
+

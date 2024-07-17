@@ -190,6 +190,8 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 	}
 	if debugopts.BUNDLE_DEBUG {
 		fmt.Printf("Saved block: index: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, len(block))
+		fmt.Printf("Current state: ")
+		bundle.Bitfield.Print()
 	}
 	return err
 }
@@ -206,13 +208,18 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Only called from w
 			if numBytesToWrite+fileBytesOffset > bundleFile.Length {
 				numBytesToWrite = bundleFile.Length - numBytesToWrite
 			}
+			if curByte+numBytesToWrite > int64(len(bytes)) {
+				numBytesToWrite = int64(len(bytes)) - curByte
+			}
+
 			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0777)
 			if err != nil {
 				return err
 			}
 			defer file.Close()
 
-			_, err = file.WriteAt(bytes[curByte:curByte+numBytesToWrite], fileBytesOffset)
+			bytesToWrite := bytes[curByte : curByte+numBytesToWrite]
+			_, err = file.WriteAt(bytesToWrite, fileBytesOffset)
 			if err != nil {
 				return err
 			}

@@ -113,8 +113,8 @@ func Connect(
 		remoteInterested: false,
 		remoteChoking:    true,
 		// Queues
-		ResponseOutMax:        50,
-		RequestOutMax:         10,
+		RequestOutMax:         30,
+		ResponseOutMax:        30,
 		requestInQueue:        make([]BlockRequest, 0),
 		requestOutQueue:       make([]BlockRequest, 0),
 		responseOutQueue:      make([]BlockResponse, 0),

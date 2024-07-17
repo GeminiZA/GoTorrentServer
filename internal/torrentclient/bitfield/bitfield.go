@@ -86,7 +86,7 @@ func (bf *Bitfield) FirstOff() int64 {
 }
 
 func (bf *Bitfield) SetBit(index int64) error {
-	if index > int64(len(bf.Bytes))/8 {
+	if index > bf.len {
 		return errors.New("out of bounds")
 	}
 	byteIndex := index / 8
@@ -104,9 +104,18 @@ func (bf *Bitfield) GetBit(index int64) bool {
 }
 
 func (bf *Bitfield) Complete() bool {
-	for _, b := range bf.Bytes {
-		if !(b == 0xFF) {
-			return false
+	for i, b := range bf.Bytes {
+		if b != 0xFF {
+			if i == len(bf.Bytes)-1 {
+				bitsToCheck := int(bf.len % 8)
+				for j := 0; j < bitsToCheck; j++ {
+					if (bf.Bytes[i] >> (7 - j) & 1) != 1 {
+						return false
+					}
+				}
+			} else {
+				return false
+			}
 		}
 	}
 	return true
@@ -153,9 +162,9 @@ func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
 }
 
 func (bf *Bitfield) Print() {
+	fmt.Printf("Bitfield (%d): ", bf.len)
 	for _, b := range bf.Bytes {
 		fmt.Printf("%08b ", b)
 	}
 	fmt.Println()
 }
-

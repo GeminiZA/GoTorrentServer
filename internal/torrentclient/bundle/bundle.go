@@ -154,6 +154,18 @@ func checkFile(path string, length int64) bool {
 	return info.Size() == length
 }
 
+func (bundle *Bundle) DeleteFiles() error {
+	if bundle.MultiFile {
+		for _, fileInfo := range bundle.Files {
+			err := os.Remove(fileInfo.Path)
+			if err != nil {
+				fmt.Printf("Error deleting file (%s): %v\n", fileInfo.Path, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []byte) error { // beginOffset will always match a block in pieces
 	bundle.mux.Lock()
 	defer bundle.mux.Unlock()
@@ -173,6 +185,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 		}
 	}
 	if bundle.Bitfield.Complete() {
+		fmt.Println("Bundle download complete!!!!!")
 		bundle.Complete = true
 	}
 	if debugopts.BUNDLE_DEBUG {

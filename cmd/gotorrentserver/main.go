@@ -85,22 +85,29 @@ func TestPeer(tfPath string, myPeerID string) {
 			continue
 		}
 		fmt.Printf("Succesfully connected to peer (%s)\n", peerDetails.PeerID)
-		defer curPeer.Close()
 		break
 	}
 	if curPeer.Connected {
 		time.Sleep(2 * time.Second)
 		start := time.Now()
-		for start.Add(10 * time.Second).After(time.Now()) {
+		nextBlocks := make([]*bundle.BlockInfo, 0)
+		for !bdl.Complete && start.Add(3*time.Minute).After(time.Now()) {
 			numBlocksNeeded := curPeer.NumRequestsCanAdd()
-			nextBlocks := bdl.NextNBlocks(numBlocksNeeded)
-			fmt.Println("Blocks to be requested:")
+			nextBlocks = append(nextBlocks, bdl.NextNBlocks(numBlocksNeeded)...)
+			fmt.Printf("Blocks to be requested (Added %d):\n", numBlocksNeeded)
 			for _, block := range nextBlocks {
 				fmt.Printf("(%d, %d, %d)\n", block.PieceIndex, block.BeginOffset, block.Length)
 			}
-			for _, blockinfo := range nextBlocks {
-				fmt.Printf("Queuing request: (%d, %d, %d)\n", blockinfo.PieceIndex, blockinfo.BeginOffset, blockinfo.Length)
-				curPeer.QueueRequestOut(*blockinfo)
+			i := 0
+			for i < len(nextBlocks) {
+				err := curPeer.QueueRequestOut(*nextBlocks[i])
+				if err != nil {
+					fmt.Printf("Error adding request to queue: %v\n", err)
+					i++
+				} else {
+					nextBlocks = append(nextBlocks[:i], nextBlocks[i+1:]...)
+					fmt.Printf("Added request to queue...\n")
+				}
 			}
 			curResp := curPeer.GetResponseIn()
 			for curResp != nil {
@@ -111,10 +118,12 @@ func TestPeer(tfPath string, myPeerID string) {
 				}
 				curResp = curPeer.GetResponseIn()
 			}
-			time.Sleep(time.Millisecond * 500)
+			time.Sleep(time.Millisecond * 250)
 			// Try write to bundle
 		}
 	} else {
 		fmt.Println("Peer not connected")
 	}
+	curPeer.Close()
+	time.Sleep(time.Second * 5)
 }

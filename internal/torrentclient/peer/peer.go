@@ -113,8 +113,8 @@ func Connect(
 		remoteInterested: false,
 		remoteChoking:    true,
 		// Queues
-		ResponseOutMax:        2,
-		RequestOutMax:         2,
+		ResponseOutMax:        50,
+		RequestOutMax:         10,
 		requestInQueue:        make([]BlockRequest, 0),
 		requestOutQueue:       make([]BlockRequest, 0),
 		responseOutQueue:      make([]BlockResponse, 0),
@@ -168,14 +168,24 @@ func (peer *Peer) Close() {
 // Exported Interface
 
 func (peer *Peer) NumRequestsCanAdd() int {
+	peer.mux.Lock()
+	defer peer.mux.Unlock()
+
 	return peer.RequestOutMax - len(peer.requestOutQueue)
 }
 
 func (peer *Peer) NumResponsesCanAdd() int {
+	peer.mux.Lock()
+	defer peer.mux.Unlock()
+
 	return peer.ResponseOutMax - len(peer.responseOutQueue)
 }
 
 func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
+	if len(peer.requestOutQueue) == peer.RequestOutMax {
+		return errors.New("requestOutQueue at capacity")
+	}
+
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
@@ -333,6 +343,8 @@ func (peer *Peer) run() {
 	for peer.Connected {
 		peer.UpdateRates()
 
+		var err error
+
 		// Check if alive
 
 		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
@@ -350,19 +362,34 @@ func (peer *Peer) run() {
 			}
 		}
 
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Requests out queue:")
+			for _, req := range peer.requestOutQueue {
+				fmt.Printf("(%d, %d, %d) (sent: %v)\n", req.info.PieceIndex, req.info.BeginOffset, req.info.Length, req.sent)
+			}
+			fmt.Println("Reading messages in...")
+		}
+
 		// Process messages in
-		msgIn, err := peer.readMessage()
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// fmt.Println("No new message")
-			} else {
-				fmt.Println("Error reading message from peer: ", err)
-			}
-		} else {
-			err = peer.handleMessageIn(msgIn)
+		for numReads := 0; numReads < 15; numReads++ {
+			msgIn, err := peer.readMessage()
 			if err != nil {
-				fmt.Println("Error handling message from peer: ", err)
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					break
+					// fmt.Println("No new message")
+				} else {
+					fmt.Println("Error reading message from peer: ", err)
+				}
+			} else {
+				err = peer.handleMessageIn(msgIn)
+				if err != nil {
+					fmt.Println("Error handling message from peer: ", err)
+				}
 			}
+		}
+
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Done reading messages in...")
 		}
 
 		// Process messages out
@@ -378,10 +405,15 @@ func (peer *Peer) run() {
 								fmt.Println("Error sending request to peer: ", err)
 							}
 							peer.requestOutQueue[i].sent = true
+							peer.requestOutQueue[i].reqTime = time.Now()
 						}
 					}
 				}
 			}
+		}
+
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Done sending requests out...")
 		}
 
 		if len(peer.responseOutQueue) > 0 {
@@ -394,6 +426,10 @@ func (peer *Peer) run() {
 					peer.responseOutQueue = peer.responseOutQueue[1:]
 				}
 			}
+		}
+
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Done sending responses out...")
 		}
 
 		// Keep alive
@@ -414,6 +450,10 @@ func (peer *Peer) run() {
 				continue
 			}
 			i++
+		}
+
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Done handling timed pieces...")
 		}
 	}
 }
@@ -495,7 +535,13 @@ func (peer *Peer) sendHandshake() error {
 }
 
 func (peer *Peer) handleMessageIn(msg *message.Message) error {
+	peer.mux.Lock()
+	defer peer.mux.Unlock()
+
 	peer.timeLastReceived = time.Now()
+	if msg == nil {
+		return nil
+	}
 	switch msg.Type {
 	case message.KEEP_ALIVE:
 		// Do nothing
@@ -506,10 +552,8 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 	case message.INTERESTED:
 		peer.remoteInterested = true
 	case message.NOT_INTERESTED:
-		peer.mux.Lock()
 		peer.remoteInterested = false
 		peer.requestInQueue = make([]BlockRequest, 0)
-		peer.mux.Unlock()
 	case message.HAVE:
 		peer.remoteBitfield.SetBit(int64(msg.Index))
 	case message.BITFIELD:
@@ -518,7 +562,6 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		if !peer.remoteInterested || peer.amChoking {
 			return nil
 		}
-		peer.mux.Lock()
 		newReq := BlockRequest{
 			info: bundle.BlockInfo{
 				PieceIndex:  int64(msg.Index),
@@ -538,9 +581,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			i++
 		}
 		peer.requestInQueue = append(peer.requestInQueue, newReq)
-		peer.mux.Unlock()
 	case message.PIECE:
-		peer.mux.Lock()
 		peer.bytesDownloaded += int64(len(msg.Piece))
 		newRes := BlockResponse{
 			PieceIndex:  msg.Index,
@@ -563,9 +604,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		}
 		peer.responseInQueue = append(peer.responseInQueue, newRes)
 		fmt.Printf("Response added to responseInQueue\n")
-		peer.mux.Unlock()
 	case message.CANCEL:
-		peer.mux.Lock()
 		req := BlockRequest{
 			info: bundle.BlockInfo{
 				PieceIndex:  int64(msg.Index),
@@ -583,7 +622,6 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			}
 			i++
 		}
-		peer.mux.Unlock()
 	case message.PORT:
 		// Not implemented
 	default:
@@ -695,7 +733,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	const MESSAGE_READ_TIMEOUT_MS = 1000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
 	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
+	peer.conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond)) // 20 ms read for message length
 	n, err := peer.conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
@@ -713,6 +751,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if msgLen == 0 {
 		return message.NewKeepAlive(), nil
 	}
+	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
 	msgBytes := make([]byte, 0)
 	bytesRead := 0
 	for len(msgBytes) < msgLen {

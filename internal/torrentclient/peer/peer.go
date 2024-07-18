@@ -356,10 +356,11 @@ func (peer *Peer) run() {
 		}
 
 		// If client has all pieces of remote peer no longer interested
-		if peer.bitField != nil && peer.remoteBitfield != nil {
-			if peer.bitField.HasAll(peer.remoteBitfield) {
-				peer.sendNotInterested()
-			}
+		if peer.bitField != nil &&
+			peer.remoteBitfield != nil &&
+			peer.amInterested &&
+			peer.bitField.HasAll(peer.remoteBitfield) {
+			peer.sendNotInterested()
 		}
 
 		if debugopts.PEER_DEBUG {

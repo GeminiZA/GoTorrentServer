@@ -125,10 +125,10 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	for _, bundleFile := range bundle.Files {
 		if debugopts.BUNDLE_DEBUG {
-			fmt.Printf("Creating file: %s (%fMB)\n", bundleFile.Path, float64(bundleFile.Length)/1024/1024)
+			fmt.Printf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length)
 		}
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
-			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0777)
+			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0644)
 			if err != nil {
 				return nil, err
 			}
@@ -196,39 +196,45 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 	return err
 }
 
-func (bundle *Bundle) writePiece(pieceIndex int64) error { // Only called from within bundle so no muxlock
-	curPiece := bundle.Pieces[pieceIndex]
-	bytes := curPiece.GetBytes()
-	curByte := int64(0)
-	for _, bundleFile := range bundle.Files {
-		curByteOffset := curPiece.ByteOffset + curByte
-		if bundleFile.ByteStart <= curByteOffset && curByteOffset <= bundleFile.ByteStart+bundleFile.Length {
-			numBytesToWrite := int64(len(bytes)) - curByte
-			fileBytesOffset := curByteOffset - bundleFile.ByteStart
-			if numBytesToWrite+fileBytesOffset > bundleFile.Length {
-				numBytesToWrite = bundleFile.Length - numBytesToWrite
-			}
-			if curByte+numBytesToWrite > int64(len(bytes)) {
-				numBytesToWrite = int64(len(bytes)) - curByte
-			}
-
-			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0777)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			bytesToWrite := bytes[curByte : curByte+numBytesToWrite]
-			_, err = file.WriteAt(bytesToWrite, fileBytesOffset)
-			if err != nil {
-				return err
-			}
-
-			curByte += numBytesToWrite
-			if curByte == int64(len(bytes)) {
-				break // Done writing piece
-			}
+func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only called after mux lock so
+	piece := bundle.Pieces[pieceIndex]
+	bytes := piece.GetBytes()
+	if !bundle.MultiFile {
+		file, err := os.OpenFile(bundle.Name, os.O_WRONLY, 0644)
+		if err != nil {
+			return err
 		}
+		_, err = file.WriteAt(bytes, piece.ByteOffset)
+		if err != nil {
+			panic(err)
+		}
+	} else { // Else multifile
+		pieceByteWriteStartOffset := int64(0)
+		for _, bundleFile := range bundle.Files {
+			if bundleFile.ByteStart > pieceByteWriteStartOffset+piece.ByteOffset ||
+				bundleFile.ByteStart+bundleFile.Length < pieceByteWriteStartOffset+piece.ByteOffset { // if bytes to write do not start in this file
+				continue
+			}
+			pieceByteWriteEndOffset := piece.length
+			if pieceByteWriteEndOffset+piece.ByteOffset > bundleFile.ByteStart+bundleFile.Length { // if the piece ends after the end of the file
+				pieceByteWriteEndOffset = bundleFile.ByteStart + bundleFile.Length - piece.ByteOffset // set pieceByteWriteEndOffset to the last byte in the file
+			}
+			bytesToWrite := bytes[pieceByteWriteStartOffset:pieceByteWriteEndOffset] // Reslice to correct bytes to write
+			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0644)
+			if err != nil {
+				return err
+			}
+			fileWriteOffset := pieceByteWriteStartOffset + piece.ByteOffset - bundleFile.ByteStart
+			_, err = file.WriteAt(bytesToWrite, fileWriteOffset)
+			if err != nil {
+				return err
+			}
+			// writePiece
+			if pieceByteWriteEndOffset == piece.ByteOffset+piece.length { // if last byte in the piece is written
+				break
+			}
+			pieceByteWriteStartOffset = pieceByteWriteEndOffset // start next write at current end
+		} // end iterating through files
 	}
 	return nil
 }
@@ -244,7 +250,7 @@ func (bundle *Bundle) loadPiece(pieceIndex int64) error {
 			if fileByteOffset+bytesLeft > bundleFile.Length {
 				readLen = bytesLeft - (bundleFile.Length - fileByteOffset)
 			}
-			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0777)
+			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0644)
 			if err != nil {
 				return err
 			}

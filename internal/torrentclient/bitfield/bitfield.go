@@ -103,6 +103,12 @@ func (bf *Bitfield) GetBit(index int64) bool {
 	return (1 & (bf.Bytes[byteIndex] >> (7 - bitIndex))) == 1
 }
 
+func (bf *Bitfield) Reset() {
+	for i := range bf.Bytes {
+		bf.Bytes[i] = 0
+	}
+}
+
 func (bf *Bitfield) Complete() bool {
 	for i, b := range bf.Bytes {
 		if b != 0xFF {

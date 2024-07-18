@@ -7,6 +7,8 @@
 package bundle
 
 import (
+	"bytes"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"os"
@@ -240,6 +242,15 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only c
 }
 
 func (bundle *Bundle) loadPiece(pieceIndex int64) error {
+	pieceBytes, err := bundle.readPiece(pieceIndex)
+	if err != nil {
+		return err
+	}
+	bundle.pieceCache.Put(pieceIndex, pieceBytes)
+	return nil
+}
+
+func (bundle *Bundle) readPiece(pieceIndex int64) ([]byte, error) {
 	pieceBytes := []byte{}
 	bytesLeft := bundle.Pieces[pieceIndex].length
 	byteOffset := bundle.Pieces[pieceIndex].ByteOffset
@@ -252,13 +263,13 @@ func (bundle *Bundle) loadPiece(pieceIndex int64) error {
 			}
 			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0644)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			defer file.Close()
 			buf := make([]byte, readLen)
 			_, err = file.ReadAt(buf, fileByteOffset)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			pieceBytes = append(pieceBytes, buf...)
 			bytesLeft -= readLen
@@ -268,8 +279,7 @@ func (bundle *Bundle) loadPiece(pieceIndex int64) error {
 			}
 		}
 	}
-	bundle.pieceCache.Put(pieceIndex, pieceBytes)
-	return nil
+	return pieceBytes, nil
 }
 
 func (bundle *Bundle) GetBlock(bi *BlockInfo) ([]byte, error) {
@@ -334,4 +344,27 @@ func (bundle *Bundle) BytesLeft() int64 {
 func (bundle *Bundle) PrintStatus() {
 	fmt.Printf("Bundle status: \n")
 	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
+}
+
+func (bundle *Bundle) Recheck() {
+	bundle.Bitfield.Reset()
+	for pieceIndex := int64(0); pieceIndex < int64(len(bundle.Pieces)); pieceIndex++ {
+		pieceBytes, err := bundle.readPiece(pieceIndex)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		hasher := sha1.New()
+		_, err = hasher.Write(pieceBytes)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		pieceHash := hasher.Sum(nil)
+		if bytes.Equal(pieceHash, bundle.Pieces[pieceIndex].hash) {
+			bundle.Bitfield.SetBit(pieceIndex)
+		}
+	}
+	fmt.Printf("Recheck complete bitfield: ")
+	bundle.Bitfield.Print()
 }

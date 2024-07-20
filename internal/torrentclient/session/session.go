@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
@@ -12,19 +13,14 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
 
-type blockRequest struct {
-	info *bundle.BlockInfo
-	sent bool
-}
-
 type Session struct {
 	bundle  *bundle.Bundle
 	dbc     *database.DBConn
 	tracker *tracker.Tracker
 	tf      *torrentfile.TorrentFile
 
-	maxDownRateKB float64
-	maxUpRateKB   float64
+	maxDownloadRateKB float64
+	maxUploadRateKB   float64
 
 	peers []*peer.Peer
 
@@ -35,27 +31,30 @@ type Session struct {
 	downloadRateKB float64
 	uploadRateKB   float64
 
-	blockQueue    []blockRequest
+	blockQueue    []*peer.BlockRequest
 	blockQueueMax int
+
+	running bool
 }
 
 // Exported
 
 func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, listenPort int, peerID string) (*Session, error) {
 	session := Session{
-		peers:          make([]*peer.Peer, 0),
-		bundle:         bnd,
-		tf:             tf,
-		dbc:            dbc,
-		listenPort:     listenPort,
-		peerID:         peerID,
-		maxDownRateKB:  0,
-		maxUpRateKB:    0,
-		maxPeers:       1,
-		downloadRateKB: 0,
-		uploadRateKB:   0,
-		blockQueue:     make([]blockRequest, 0),
-		blockQueueMax:  50,
+		peers:             make([]*peer.Peer, 0),
+		bundle:            bnd,
+		tf:                tf,
+		dbc:               dbc,
+		listenPort:        listenPort,
+		peerID:            peerID,
+		maxDownloadRateKB: 0,
+		maxUploadRateKB:   0,
+		maxPeers:          1,
+		downloadRateKB:    0,
+		uploadRateKB:      0,
+		blockQueue:        make([]*peer.BlockRequest, 0),
+		blockQueueMax:     50,
+		running:           false,
 	}
 	session.tracker = tracker.New(tf.Announce, tf.InfoHash, listenPort, 0, 0, 0, peerID)
 	return &session, nil
@@ -82,12 +81,15 @@ func (session *Session) Start() error {
 		}
 	}
 
+	session.running = true
+
 	go session.run()
 
 	return nil
 }
 
 func (session *Session) Stop() {
+	session.running = false
 	err := session.tracker.Stop()
 	if err != nil {
 		fmt.Printf("Error stopping tracker: %v\n", err)
@@ -99,21 +101,85 @@ func (session *Session) Stop() {
 }
 
 func (session *Session) SetMaxDown(rateKB float64) {
-	session.maxDownRateKB = rateKB
+	session.maxDownloadRateKB = rateKB
 }
 
 func (session *Session) SetMaxUpRate(rateKB float64) {
-	session.maxUpRateKB = rateKB
+	session.maxUploadRateKB = rateKB
 }
 
 // Internal
 
 func (session *Session) run() {
-	if !session.bundle.Complete {
-		if len(session.blockQueue) < session.blockQueueMax {
-			session.fetchBlockInfos()
+	for session.running {
+		if session.bundle.Complete { // Seeding
+			// Check for upload rate
+
+			// Assign Responses
+
+			// Check for new peers connecting
+			//
+		} else { // Leeching
+
+			session.sortPeers()
+			session.calcRates()
+
+			// Check for cancelled pieces
+			for _, curPeer := range session.peers {
+				if curPeer.NumRequestsCancelled() > 0 {
+					cancelled := curPeer.GetCancelledRequests()
+					for _, req := range cancelled {
+						i := 0
+						for i < len(session.blockQueue) {
+							if req.Equal(session.blockQueue[i]) {
+								session.bundle.CancelBlock(&req.Info)
+								session.blockQueue = append(session.blockQueue[:i], session.blockQueue[i+1:]...)
+								break
+							}
+							i++
+						}
+					}
+				}
+			}
+
+			// Assign blocks to queue
+			if len(session.blockQueue) < session.blockQueueMax {
+				space := session.blockQueueMax - len(session.blockQueue)
+				blocksToRequest := session.bundle.NextNBlocks(space)
+				requestsToAdd := make([]*peer.BlockRequest, 0)
+				for _, block := range blocksToRequest {
+					newReq := &peer.BlockRequest{
+						Info:    *block,
+						ReqTime: time.Time{},
+						Sent:    false,
+					}
+					requestsToAdd = append(requestsToAdd, newReq)
+				}
+				session.blockQueue = append(session.blockQueue, requestsToAdd...)
+			}
+
+			if session.maxDownloadRateKB == 0 || session.downloadRateKB < session.maxDownloadRateKB {
+				// Assign requests to peers
+				for _, curPeer := range session.peers {
+					numCanAdd := curPeer.NumRequestsCanAdd()
+				}
+			}
+
+			// Check for requests
+
+			if session.maxUploadRateKB == 0 || session.uploadRateKB < session.maxUploadRateKB {
+				// Assign Responses
+			}
+
+			// Check for responses
+
+			// Check for snubbing peers
+
+			// Check for new peers connecting
+
+			// Check for new peers to connect to
+			//
 		}
-		session.assignParts()
 	}
 }
 

@@ -29,7 +29,10 @@ func main() {
 				}
 				TestPeer(os.Args[4], "TESTID12321232123212")
 			} else if testPkg == "session" {
-				// Session tests
+				if len(os.Args) < 5 {
+					panic("in peer test no torrent file specified")
+				}
+				TestSession(os.Args[4], "TESTID12321232123212")
 			} else {
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
@@ -38,6 +41,9 @@ func main() {
 			// Run server
 		}
 	}
+}
+
+func TestSession(tfPath string, myPeerID string) {
 }
 
 func TestPeer(tfPath string, myPeerID string) {
@@ -124,6 +130,7 @@ func TestPeer(tfPath string, myPeerID string) {
 	} else {
 		fmt.Println("Peer not connected")
 	}
+	fmt.Printf("Peer test complete:\nDownloadRate: %f kbps\nUploadRate: %f kbps\n", curPeer.DownloadRateKB, curPeer.UploadRateKB)
 	curPeer.Close()
 	time.Sleep(time.Second * 5)
 }

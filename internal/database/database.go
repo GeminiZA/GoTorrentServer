@@ -181,4 +181,3 @@ func (dbc *DBConn) UpdateTorrentStatus(infoHash []byte, status int) error {
 	}
 	return nil
 }
-

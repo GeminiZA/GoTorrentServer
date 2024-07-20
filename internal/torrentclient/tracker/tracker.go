@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
@@ -62,7 +63,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 	bodyDict, err := bencode.Parse(&body)
 	fmt.Printf("Successfully parsed body\n")
 	if DEBUG_TRACKER {
-		fmt.Println(bodyDict)
+		// fmt.Printf("Tracker body response: %v\n", bodyDict)
 	}
 	if err != nil {
 		return err
@@ -118,9 +119,6 @@ func (tracker *Tracker) parseBody(body []byte) error {
 	}
 	tracker.Peers = make([]PeerInfo, 0)
 	if peers, ok := bodyDict["peers"]; ok {
-		if DEBUG_TRACKER {
-			fmt.Printf("Found peers: %v\n", peers)
-		}
 		if peersListInter, ok := peers.([]interface{}); ok {
 			peersList := make([]map[string]interface{}, 0)
 			for _, inter := range peersListInter {
@@ -128,10 +126,24 @@ func (tracker *Tracker) parseBody(body []byte) error {
 					peersList = append(peersList, mp)
 				}
 			}
+			if DEBUG_TRACKER {
+				fmt.Printf("Found peers: \n")
+			}
 			for _, peer := range peersList {
 				peerID, ok := peer["peer id"].(string)
 				if !ok {
 					return errors.New("peer id not string")
+				}
+				skip := false
+				for _, r := range peerID {
+					if !unicode.IsPrint(r) {
+						skip = true
+						break
+					}
+				}
+				if skip {
+					fmt.Printf("Skipping unprintable peer ID: %x\n", peerID)
+					continue
 				}
 				peerIP, ok := peer["ip"].(string)
 				if !ok {
@@ -140,6 +152,9 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				peerPort, ok := peer["port"].(int64)
 				if !ok {
 					return errors.New("peerid not string")
+				}
+				if DEBUG_TRACKER {
+					fmt.Printf("PeerID: %x; IP: %s; Port: %d\n", peerID, peerIP, int(peerPort))
 				}
 				tracker.Peers = append(tracker.Peers, PeerInfo{PeerID: peerID, IP: peerIP, Port: int(peerPort)})
 			}
@@ -289,4 +304,3 @@ func (tracker *Tracker) run() {
 	}
 	fmt.Printf("Tracker stopped...\n")
 }
-

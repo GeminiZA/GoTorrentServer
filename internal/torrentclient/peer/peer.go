@@ -503,9 +503,9 @@ func (peer *Peer) readHandshake() error {
 	if debugopts.PEER_DEBUG {
 		fmt.Printf("Handshake successfully read from peer(%s)...\n", handshakeMsg.PeerID)
 	}
-	if peer.RemotePeerID != handshakeMsg.PeerID {
-		return errors.New("peerID mismatch")
-	}
+	//	if peer.RemotePeerID != handshakeMsg.PeerID {
+	//return errors.New("peerID mismatch")
+	//}
 	if !bytes.Equal(peer.infoHash, handshakeMsg.InfoHash) {
 		return errors.New("infohash mismatch")
 	}

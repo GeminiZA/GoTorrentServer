@@ -5,8 +5,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
@@ -44,6 +46,34 @@ func main() {
 }
 
 func TestSession(tfPath string, myPeerID string) {
+	tf, err := torrentfile.ParseFile(tfPath)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Torrentfile succesfully parsed")
+	bdl, err := bundle.NewBundle(tf, "./TestBundle", 20)
+	if err != nil {
+		panic(err)
+	}
+	dbc, err := database.Connect()
+	if err != nil {
+		panic(err)
+	}
+	defer dbc.Disconnect()
+	listenPort := 8665
+	sesh, err := session.New(bdl, dbc, tf, listenPort, myPeerID)
+	if err != nil {
+		panic(err)
+	}
+	err = sesh.Start()
+	if err != nil {
+		panic(err)
+	}
+	defer sesh.Stop()
+	start := time.Now()
+	for start.Add(time.Second*60).After(time.Now()) && !bdl.Complete {
+		time.Sleep(time.Second)
+	}
 }
 
 func TestPeer(tfPath string, myPeerID string) {
@@ -115,14 +145,15 @@ func TestPeer(tfPath string, myPeerID string) {
 					fmt.Printf("Added request to queue...\n")
 				}
 			}
-			curResp := curPeer.GetResponseIn()
-			for curResp != nil {
-				fmt.Printf("Got response in main: Index: %d, Offset: %d\n", curResp.PieceIndex, curResp.BeginOffset)
-				err = bdl.WriteBlock(int64(curResp.PieceIndex), int64(curResp.BeginOffset), curResp.Block)
-				if err != nil {
-					fmt.Printf("Error writing block (%d, %d): %v", curResp.PieceIndex, curResp.BeginOffset, err)
+			if curPeer.NumResponsesIn() > 0 {
+				responses := curPeer.GetResponsesIn()
+				for len(responses) > 0 {
+					err := bdl.WriteBlock(int64(responses[0].PieceIndex), int64(responses[0].BeginOffset), responses[0].Block)
+					if err != nil {
+						fmt.Printf("err writing block: %v\n", err)
+					}
+					responses = responses[1:]
 				}
-				curResp = curPeer.GetResponseIn()
 			}
 			time.Sleep(time.Millisecond * 250)
 			// Try write to bundle
@@ -132,5 +163,4 @@ func TestPeer(tfPath string, myPeerID string) {
 	}
 	fmt.Printf("Peer test complete:\nDownloadRate: %f kbps\nUploadRate: %f kbps\n", curPeer.DownloadRateKB, curPeer.UploadRateKB)
 	curPeer.Close()
-	time.Sleep(time.Second * 5)
 }

@@ -45,10 +45,10 @@ func Connect() (*DBConn, error) {
 	}, nil
 }
 
-func (dbc *DBConn) Disconnect() error {
+func (dbc *DBConn) Disconnect() {
 	dbc.mux.Lock()
 	defer dbc.mux.Unlock()
-	return dbc.db.Close()
+	dbc.db.Close()
 }
 
 func (dbc *DBConn) GetBitfield(infoHash []byte) (*bitfield.Bitfield, error) {

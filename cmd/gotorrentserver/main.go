@@ -20,6 +20,7 @@ func main() {
 	if len(os.Args) > 2 {
 		arg := os.Args[2]
 		if arg == "test" {
+			myPeerID := "-TR2940-6oFw2M6BdUkY"
 			if len(os.Args) < 4 {
 				panic("no package to test specified")
 			}
@@ -29,12 +30,12 @@ func main() {
 				if len(os.Args) < 5 {
 					panic("in peer test no torrent file specified")
 				}
-				TestPeer(os.Args[4], "TESTID12321232123212")
+				TestPeer(os.Args[4], myPeerID)
 			} else if testPkg == "session" {
 				if len(os.Args) < 5 {
 					panic("in peer test no torrent file specified")
 				}
-				TestSession(os.Args[4], "TESTID12321232123212")
+				TestSession(os.Args[4], myPeerID)
 			} else {
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
@@ -60,7 +61,7 @@ func TestSession(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	defer dbc.Disconnect()
-	listenPort := 8665
+	listenPort := 6681
 	sesh, err := session.New(bdl, dbc, tf, listenPort, myPeerID)
 	if err != nil {
 		panic(err)
@@ -88,7 +89,7 @@ func TestPeer(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	trk := tracker.New(
-		tf.Announce,
+		tf.AnnounceList,
 		bdl.InfoHash,
 		6681,
 		0,
@@ -99,6 +100,7 @@ func TestPeer(tfPath string, myPeerID string) {
 	err = trk.Start()
 	if err != nil {
 		fmt.Printf("Error starting tracker: %v\n", err)
+		return
 	}
 	defer trk.Stop()
 	var curPeer *peer.Peer

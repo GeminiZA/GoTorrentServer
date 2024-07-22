@@ -57,14 +57,14 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		blockQueueMax:     50,
 		running:           false,
 	}
-	session.tracker = tracker.New(tf.Announce, tf.InfoHash, listenPort, 0, 0, 0, peerID)
+	session.tracker = tracker.New(tf.AnnounceList, tf.InfoHash, listenPort, 0, 0, 0, peerID)
 	return &session, nil
 }
 
 func (session *Session) Start() error {
 	err := session.tracker.Start()
 	if err != nil {
-		return err
+		return fmt.Errorf("error starting tracker in session: %v", err)
 	}
 	session.running = true
 

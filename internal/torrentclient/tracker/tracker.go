@@ -11,10 +11,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
-
-const DEBUG_TRACKER bool = true
 
 type PeerInfo struct {
 	PeerID string
@@ -23,46 +22,51 @@ type PeerInfo struct {
 }
 
 type Tracker struct {
-	instantiated bool
-	TrackerUrl   string
-	InfoHash     []byte
-	Port         int
-	TrackerID    string
-	Downloaded   int64
-	Uploaded     int64
-	Left         int64
-	PeerID       string
-	Interval     time.Duration
-	MinInterval  time.Duration
-	Seeders      int64
-	Leechers     int64
-	Peers        []PeerInfo
-	running      bool
-	lastAnnounce time.Time
-	mux          sync.Mutex
+	instantiated       bool
+	announcelist       [][]string
+	announceErrorCount int
+	TrackerUrl         string
+	InfoHash           []byte
+	Port               int
+	TrackerID          string
+	Downloaded         int64
+	Uploaded           int64
+	Left               int64
+	PeerID             string
+	Interval           time.Duration
+	MinInterval        time.Duration
+	Seeders            int64
+	Leechers           int64
+	Peers              []PeerInfo
+	running            bool
+	lastAnnounce       time.Time
+	mux                sync.Mutex
 }
 
-func New(trackerUrl string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
-	tracker := Tracker{}
-	tracker.InfoHash = infoHash
-	tracker.TrackerUrl = trackerUrl
-	tracker.Port = port
-	tracker.Downloaded = downloaded
-	tracker.Uploaded = uploaded
-	tracker.Left = left
-	tracker.PeerID = peerId
-	tracker.TrackerID = ""
-	tracker.Seeders = 0
-	tracker.Leechers = 0
-	tracker.instantiated = true
-	tracker.running = false
-	return &tracker
+func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
+	return &Tracker{
+		InfoHash:           infoHash,
+		announcelist:       announcelist,
+		announceErrorCount: 0,
+		TrackerUrl:         "",
+		Port:               port,
+		Downloaded:         downloaded,
+		Uploaded:           uploaded,
+		Left:               left,
+		PeerID:             peerId,
+		TrackerID:          "",
+		Seeders:            0,
+		Leechers:           0,
+		instantiated:       true,
+		running:            false,
+	}
 }
 
 func (tracker *Tracker) parseBody(body []byte) error {
 	bodyDict, err := bencode.Parse(&body)
 	fmt.Printf("Successfully parsed body\n")
-	if DEBUG_TRACKER {
+	fmt.Printf("%v\n", bodyDict)
+	if debugopts.TRACKER_DEBUG {
 		// fmt.Printf("Tracker body response: %v\n", bodyDict)
 	}
 	if err != nil {
@@ -126,7 +130,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 					peersList = append(peersList, mp)
 				}
 			}
-			if DEBUG_TRACKER {
+			if debugopts.TRACKER_DEBUG {
 				fmt.Printf("Found peers: \n")
 			}
 			for _, peer := range peersList {
@@ -153,7 +157,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				if !ok {
 					return errors.New("peerid not string")
 				}
-				if DEBUG_TRACKER {
+				if debugopts.TRACKER_DEBUG {
 					fmt.Printf("PeerID: %x; IP: %s; Port: %d\n", peerID, peerIP, int(peerPort))
 				}
 				tracker.Peers = append(tracker.Peers, PeerInfo{PeerID: peerID, IP: peerIP, Port: int(peerPort)})
@@ -170,16 +174,23 @@ func (tracker *Tracker) Start() error {
 		return errors.New("tracker incorrectly instantiated")
 	}
 
-	err := tracker.start()
-	if err != nil {
-		return err
+	fmt.Printf("Infohash hex: %x\n", tracker.InfoHash)
+
+	for _, list := range tracker.announcelist {
+		for _, url := range list {
+			tracker.TrackerUrl = url
+			err := tracker.start()
+			if err != nil {
+				fmt.Printf("error announcing to tracker (%s): %v\n", url, err)
+			} else { // Successfully announced
+				tracker.running = true
+				go tracker.run()
+				return nil
+			}
+		}
 	}
 
-	tracker.running = true
-
-	go tracker.run()
-
-	return nil
+	return errors.New("no more trackers to try")
 }
 
 func (tracker *Tracker) start() error {
@@ -200,10 +211,13 @@ func (tracker *Tracker) start() error {
 	if err != nil {
 		return err
 	}
+	if debugopts.TRACKER_DEBUG {
+		fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
+	}
 
 	defer res.Body.Close()
 
-	if DEBUG_TRACKER {
+	if debugopts.TRACKER_DEBUG {
 		fmt.Println("Got tracker response")
 	}
 
@@ -293,11 +307,41 @@ func (tracker *Tracker) Stop() error {
 func (tracker *Tracker) run() {
 	for tracker.running {
 		time.Sleep(time.Second)
-		if tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
+		if tracker.announceErrorCount > 0 || tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
 			err := tracker.start()
 			if err != nil {
-				fmt.Printf("Error in tracker running: %v\n", err)
+				tracker.announceErrorCount++
+				fmt.Printf("Error in tracker running (%d/5): %v\n", tracker.announceErrorCount, err)
+				if tracker.announceErrorCount > 5 { // Get new tracker
+					fmt.Print("Getting new tracker...\n")
+					found := false
+					connected := false
+					for _, list := range tracker.announcelist {
+						if connected {
+							break
+						}
+						for _, url := range list {
+							if connected {
+								break
+							}
+							if found {
+								tracker.TrackerUrl = url
+								err := tracker.start()
+								if err == nil {
+									connected = true
+								} else {
+									fmt.Printf("error announcing to tracker(%s): %v\n", url, err)
+								}
+							} else {
+								if url == tracker.TrackerUrl {
+									found = true
+								}
+							}
+						}
+					}
+				}
 			} else {
+				tracker.announceErrorCount = 0
 				fmt.Printf("Tracker reannounced...\n")
 			}
 		}

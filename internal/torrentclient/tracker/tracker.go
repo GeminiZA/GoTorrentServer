@@ -1,12 +1,16 @@
 package tracker
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode"
@@ -41,6 +45,15 @@ type Tracker struct {
 	running            bool
 	lastAnnounce       time.Time
 	mux                sync.Mutex
+
+	// UDP announce
+	connectionID         uint32
+	transactionID        uint32
+	udpConn              *net.UDPConn
+	udpAddr              *net.UDPAddr
+	udpBuff              []byte
+	connectionIDRecvTime time.Time
+	timeoutStep          int
 }
 
 func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
@@ -59,6 +72,13 @@ func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, u
 		Leechers:           0,
 		instantiated:       true,
 		running:            false,
+
+		connectionID:         0,
+		transactionID:        0,
+		udpConn:              nil,
+		udpBuff:              nil,
+		connectionIDRecvTime: time.Time{},
+		timeoutStep:          -1,
 	}
 }
 
@@ -179,7 +199,7 @@ func (tracker *Tracker) Start() error {
 	for _, list := range tracker.announcelist {
 		for _, url := range list {
 			tracker.TrackerUrl = url
-			err := tracker.start()
+			err := tracker.announce()
 			if err != nil {
 				fmt.Printf("error announcing to tracker (%s): %v\n", url, err)
 			} else { // Successfully announced
@@ -193,7 +213,7 @@ func (tracker *Tracker) Start() error {
 	return errors.New("no more trackers to try")
 }
 
-func (tracker *Tracker) start() error {
+func (tracker *Tracker) announce() error {
 	tracker.mux.Lock()
 	defer tracker.mux.Unlock()
 
@@ -207,34 +227,39 @@ func (tracker *Tracker) start() error {
 	params.Add("compact", "0")
 	params.Add("event", "started")
 
-	res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
-	if err != nil {
-		return err
-	}
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
-	}
+	if strings.Contains(tracker.TrackerUrl, "udp://") {
+		// udp announce
+		// Make connection request
+	} else {
+		// http / https announce
+		res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
+		if err != nil {
+			return err
+		}
+		if debugopts.TRACKER_DEBUG {
+			fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
+		}
 
-	defer res.Body.Close()
+		defer res.Body.Close()
 
-	if debugopts.TRACKER_DEBUG {
-		fmt.Println("Got tracker response")
+		if debugopts.TRACKER_DEBUG {
+			fmt.Println("Got tracker response")
+		}
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+
+		if body[0] != 'd' {
+			return fmt.Errorf("tracker response error: %s", string(body))
+		}
+
+		err = tracker.parseBody(body)
+		if err != nil {
+			return err
+		}
 	}
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-
-	if body[0] != 'd' {
-		return fmt.Errorf("tracker response error: %s", string(body))
-	}
-
-	err = tracker.parseBody(body)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -308,7 +333,7 @@ func (tracker *Tracker) run() {
 	for tracker.running {
 		time.Sleep(time.Second)
 		if tracker.announceErrorCount > 0 || tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
-			err := tracker.start()
+			err := tracker.announce()
 			if err != nil {
 				tracker.announceErrorCount++
 				fmt.Printf("Error in tracker running (%d/5): %v\n", tracker.announceErrorCount, err)
@@ -326,7 +351,7 @@ func (tracker *Tracker) run() {
 							}
 							if found {
 								tracker.TrackerUrl = url
-								err := tracker.start()
+								err := tracker.announce()
 								if err == nil {
 									connected = true
 								} else {
@@ -347,4 +372,66 @@ func (tracker *Tracker) run() {
 		}
 	}
 	fmt.Printf("Tracker stopped...\n")
+}
+
+// UDP announce
+
+func (tracker *Tracker) udpAnnounce() error {
+	if tracker.connectionIDRecvTime.IsZero() || time.Now().After(tracker.connectionIDRecvTime.Add(time.Minute)) {
+		err := tracker.udpConnect()
+	}
+	return nil
+}
+
+func (tracker *Tracker) readUDP() error {
+	if n == 0 {
+		return errors.New("0 bytes read")
+	}
+	return nil
+}
+
+func (tracker *Tracker) udpConnect() error {
+	addr, err := net.ResolveUDPAddr("udp", tracker.TrackerUrl)
+	if err != nil {
+		return err
+	}
+	tracker.udpAddr = addr
+	conn, err := net.DialUDP("udp", nil, tracker.udpAddr)
+	if err != nil {
+		return err
+	}
+	tracker.udpConn = conn
+	// {constant (8), action (4), transaction id (4)}
+	connectRequestBytes := []byte{0x04, 0x17, 0x27, 0x10, 0x19, 0x80, 0x00, 0x00, 0x00, 0x00} // Protocol constant, 0 (connect)
+	transIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(transIDBytes, uint32(rand.Int()))
+	connectRequestBytes = append(connectRequestBytes, transIDBytes...)
+	_, err = tracker.udpConn.Write(connectRequestBytes)
+	if err != nil {
+		return fmt.Errorf("5 timeouts: %v", err)
+	}
+	tracker.udpBuff = make([]byte, 1024)
+	err = tracker.readUDP()
+	for err != nil {
+		if tracker.timeoutStep == 5 {
+			return err
+		}
+		fmt.Printf("error reading udp response: %v\n", err)
+		tracker.timeoutStep++
+		time.Sleep(15 * (1 << tracker.timeoutStep) * time.Second)
+		_, err = tracker.udpConn.Write(connectRequestBytes)
+		if err != nil {
+			return err
+		}
+		tracker.udpConn.SetReadDeadline(time.Now().Add(time.Second))
+		var n int
+		n, _, err = tracker.udpConn.ReadFromUDP(tracker.udpBuff)
+		if n < 16 {
+			err = errors.New("less than 16 bytes read")
+		}
+	}
+	responseAction := binary.BigEndian.Uint32(tracker.udpBuff[0:4])
+	responseTransactionID := binary.BigEndian.Uint32(tracker.udpBuff[4:8])
+	responseConnectionID := binary.BigEndian.Uint32(tracker.udpBuff[8:16])
+	return nil
 }

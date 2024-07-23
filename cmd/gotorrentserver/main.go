@@ -105,12 +105,9 @@ func TestPeer(tfPath string, myPeerID string) {
 	defer trk.Stop()
 	var curPeer *peer.Peer
 	for _, peerDetails := range trk.Peers {
-		if peerDetails.PeerID == myPeerID {
-			continue
-		}
-		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.PeerID)
+		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.IP)
 		curPeer, err = peer.Connect(
-			peerDetails.PeerID,
+			"",
 			peerDetails.IP,
 			peerDetails.Port,
 			bdl.InfoHash,
@@ -119,10 +116,10 @@ func TestPeer(tfPath string, myPeerID string) {
 			bdl.NumPieces,
 		)
 		if err != nil {
-			fmt.Printf("Error connecting to peer(%s): %v\n", peerDetails.PeerID, err)
+			fmt.Printf("Error connecting to peer(%s): %v\n", peerDetails.IP, err)
 			continue
 		}
-		fmt.Printf("Succesfully connected to peer (%s)\n", peerDetails.PeerID)
+		fmt.Printf("Succesfully connected to peer (%s)\n", peerDetails.IP)
 		break
 	}
 	if curPeer.Connected {

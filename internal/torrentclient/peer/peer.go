@@ -52,6 +52,8 @@ func (bra *BlockRequest) Equal(brb *BlockRequest) bool {
 type Peer struct {
 	// Info
 	RemotePeerID   string
+	RemoteIP       string
+	RemotePort     int
 	peerID         string
 	infoHash       []byte
 	bitField       *bitfield.Bitfield
@@ -102,6 +104,8 @@ func Connect(
 	peer := Peer{
 		peerID:           peerID,
 		RemotePeerID:     remotePeerID,
+		RemoteIP:         remoteIP,
+		RemotePort:       remotePort,
 		infoHash:         infohash,
 		bitField:         myBitfield,
 		remoteBitfield:   bitfield.New(myBitfield.Len()),
@@ -506,7 +510,7 @@ func (peer *Peer) readHandshake() error {
 		return errors.New("invalid handshake length")
 	}
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Read handshake bytes from peer(%s): %x\n", peer.RemotePeerID, handshakeBytes)
+		fmt.Printf("Read handshake bytes from peer: %x\n", handshakeBytes)
 	}
 	handshakeMsg, err := message.ParseHandshake(handshakeBytes)
 	if err != nil {
@@ -515,6 +519,7 @@ func (peer *Peer) readHandshake() error {
 	if debugopts.PEER_DEBUG {
 		fmt.Printf("Handshake successfully read from peer(%s)...\n", handshakeMsg.PeerID)
 	}
+	peer.RemotePeerID = handshakeMsg.PeerID
 	//	if peer.RemotePeerID != handshakeMsg.PeerID {
 	//return errors.New("peerID mismatch")
 	//}

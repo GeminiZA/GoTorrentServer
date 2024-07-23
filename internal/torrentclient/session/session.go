@@ -249,11 +249,6 @@ func (session *Session) run() {
 
 func (session *Session) findNewPeer() {
 	for _, peerInfo := range session.tracker.Peers {
-		for _, curPeer := range session.peers {
-			if peerInfo.PeerID == curPeer.RemotePeerID {
-				continue
-			}
-		}
 		session.connectPeer(peerInfo)
 	}
 }
@@ -274,12 +269,12 @@ func (session *Session) fetchBlockInfos() {
 
 func (session *Session) connectPeer(pi tracker.PeerInfo) error {
 	for _, peer := range session.peers {
-		if peer.RemotePeerID == pi.PeerID {
+		if peer.RemoteIP == pi.IP && peer.RemotePort == pi.Port {
 			return errors.New("peer already connected")
 		}
 	}
 	peer, err := peer.Connect(
-		pi.PeerID,
+		"",
 		pi.IP,
 		pi.Port,
 		session.bundle.InfoHash,
@@ -288,7 +283,7 @@ func (session *Session) connectPeer(pi tracker.PeerInfo) error {
 		session.bundle.NumPieces,
 	)
 	if err != nil {
-		err = fmt.Errorf("error connecting to peer(%s): %s", pi.PeerID, err)
+		err = fmt.Errorf("error connecting to peer: %s", err)
 		return err
 	}
 	session.peers = append(session.peers, peer)

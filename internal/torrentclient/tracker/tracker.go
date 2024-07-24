@@ -523,7 +523,9 @@ func (tracker *Tracker) udpConnect() error {
 	if responseAction != 0 { // 0 => connect
 		return errors.New("udp tracker connect action not connect")
 	}
-	fmt.Printf("Parsed connect response:\nAction: %d\nTransactionID: 0x%x\nConnectionID: 0x%x\n", responseAction, responseTransactionID, responseConnectionID)
+	if debugopts.TRACKER_DEBUG {
+		fmt.Printf("Parsed connect response:\nAction: %d\nTransactionID: 0x%x\nConnectionID: 0x%x\n", responseAction, responseTransactionID, responseConnectionID)
+	}
 	tracker.connectionIDRecvTime = time.Now()
 	tracker.connectionID = responseConnectionID
 	return nil

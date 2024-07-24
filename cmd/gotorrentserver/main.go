@@ -93,6 +93,8 @@ func TestSession(tfPath string, myPeerID string) {
 	if err != nil {
 		panic(err)
 	}
+	// sesh.SetMaxDownloadRate(512)
+	// sesh.SetMaxUploadRate(64)
 	err = sesh.Start()
 	if err != nil {
 		panic(err)
@@ -154,6 +156,8 @@ func TestPeer(tfPath string, myPeerID string) {
 			numBlocksNeeded := curPeer.NumRequestsCanAdd()
 			nextBlocks = append(nextBlocks, bdl.NextNBlocks(numBlocksNeeded)...)
 			fmt.Printf("Blocks to be requested (Added %d):\n", numBlocksNeeded)
+			fmt.Printf("Current bitfield: ")
+			bdl.Bitfield.Print()
 			for _, block := range nextBlocks {
 				fmt.Printf("(%d, %d, %d)\n", block.PieceIndex, block.BeginOffset, block.Length)
 			}

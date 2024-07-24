@@ -232,13 +232,9 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 func (peer *Peer) GetRequestsIn(n int) []*BlockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
-	m := n
-	if n > len(peer.requestInQueue) {
-		m = len(peer.requestInQueue)
-	}
-	ret := peer.requestInQueue[:m]
+	ret := peer.requestInQueue[:n]
 
-	peer.requestInQueue = peer.requestInQueue[m:]
+	peer.requestInQueue = peer.requestInQueue[n:]
 	peer.pendingRequestInQueue = append(peer.pendingRequestInQueue, ret...)
 
 	return ret
@@ -346,7 +342,7 @@ func (peer *Peer) HasPiece(pieceIndex int64) bool {
 	if peer.bitField == nil {
 		return false
 	}
-	return peer.bitField.GetBit(pieceIndex)
+	return peer.remoteBitfield.GetBit(pieceIndex)
 }
 
 func (peer *Peer) Have(pieceIndex int64) error {
@@ -362,7 +358,7 @@ func (peer *Peer) Have(pieceIndex int64) error {
 func (peer *Peer) run() {
 	// Read bitfield
 
-	const BLOCK_REQUEST_TIMEOUT_MS = 5000
+	const BLOCK_REQUEST_TIMEOUT_MS = 2000
 	for peer.Connected {
 		peer.UpdateRates()
 
@@ -489,13 +485,13 @@ func (peer *Peer) UpdateRates() {
 	now := time.Now()
 	downloadElapsed := now.Sub(peer.lastDownloadUpdate).Milliseconds()
 	uploadElapsed := now.Sub(peer.lastUploadUpdate).Milliseconds()
-	if downloadElapsed > 1000 && peer.bytesDownloaded > 0 {
+	if downloadElapsed > 1000 {
 		peer.DownloadRateKB = float64(peer.bytesDownloaded) / (float64(downloadElapsed) / 1000) / 1024
 		peer.TotalBytesDownloaded += peer.bytesDownloaded
 		peer.bytesDownloaded = 0
 		peer.lastDownloadUpdate = now
 	}
-	if uploadElapsed > 1000 && peer.bytesUploaded > 0 {
+	if uploadElapsed > 1000 {
 		peer.UploadRateKB = float64(peer.bytesUploaded) / (float64(uploadElapsed) / 1000) / 1024
 		peer.TotalBytesUploaded += peer.bytesUploaded
 		peer.bytesUploaded = 0
@@ -547,14 +543,14 @@ func (peer *Peer) sendHandshake() error {
 	if n != 68 {
 		return errors.New("handshake send incomplete")
 	}
+	if debugopts.PEER_DEBUG {
+		fmt.Printf("Sent handshake to peer(%s)...\n", peer.RemotePeerID)
+	}
 	if peer.bitField != nil && peer.bitField.NumSet > 0 {
 		err = peer.sendBitField()
 		if err != nil {
 			return err
 		}
-	}
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sent handshake to peer(%s)...\n", peer.RemotePeerID)
 	}
 	return nil
 }
@@ -800,7 +796,9 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Peer (%s) Got message: ", peer.RemotePeerID)
+	if debugopts.PEER_DEBUG {
+		fmt.Printf("Peer (%s) Got message: ", peer.RemotePeerID)
+	}
 	msg.Print()
 	return msg, nil
 }

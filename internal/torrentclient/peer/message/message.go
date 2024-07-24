@@ -151,7 +151,7 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 		handshakeBytes = append(handshakeBytes, bytes[20:28]...)
 		handshakeBytes = append(handshakeBytes, bytes[28:48]...)
 		handshakeBytes = append(handshakeBytes, bytes[48:68]...)
-		fmt.Printf("Got handshake: \nHex: %x\nString: %s\n", handshakeBytes, string(handshakeBytes))
+		fmt.Printf("Got handshake: \nHex: %x\n", handshakeBytes)
 	}
 	msg.Reserved = bytes[20:28]
 	msg.InfoHash = bytes[28:48]

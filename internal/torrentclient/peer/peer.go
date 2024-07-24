@@ -72,8 +72,8 @@ type Peer struct {
 	RemoteInterested bool
 	RemoteChoking    bool
 	// Queues
-	RequestOutMax         int
-	ResponseOutMax        int
+	RequestsOutMax        int
+	ResponsesOutMax       int
 	requestInQueue        []*BlockRequest
 	pendingRequestInQueue []*BlockRequest
 	requestOutQueue       []*BlockRequest
@@ -120,8 +120,8 @@ func Connect(
 		RemoteInterested: false,
 		RemoteChoking:    true,
 		// Queues
-		RequestOutMax:         30,
-		ResponseOutMax:        30,
+		RequestsOutMax:        30,
+		ResponsesOutMax:       30,
 		requestInQueue:        make([]*BlockRequest, 0),
 		requestOutQueue:       make([]*BlockRequest, 0),
 		responseOutQueue:      make([]*BlockResponse, 0),
@@ -183,32 +183,32 @@ func (peer *Peer) SetMaxResponses(newMax int) {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	peer.ResponseOutMax = newMax
+	peer.ResponsesOutMax = newMax
 }
 
 func (peer *Peer) SetMaxRequests(newMax int) {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	peer.RequestOutMax = newMax
+	peer.RequestsOutMax = newMax
 }
 
 func (peer *Peer) NumRequestsCanAdd() int {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	return peer.RequestOutMax - len(peer.requestOutQueue)
+	return peer.RequestsOutMax - len(peer.requestOutQueue)
 }
 
 func (peer *Peer) NumResponsesCanAdd() int {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	return peer.ResponseOutMax - len(peer.responseOutQueue)
+	return peer.ResponsesOutMax - len(peer.responseOutQueue)
 }
 
 func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
-	if len(peer.requestOutQueue) == peer.RequestOutMax {
+	if len(peer.requestOutQueue) == peer.RequestsOutMax {
 		return errors.New("requestOutQueue at capacity")
 	}
 
@@ -519,8 +519,9 @@ func (peer *Peer) readHandshake() error {
 	if err != nil {
 		return err
 	}
+
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Handshake successfully read from peer(%s)...\n", handshakeMsg.PeerID)
+		fmt.Printf("Handshake successfully read from peer(%s)...\n", peer.RemoteIP)
 	}
 	peer.RemotePeerID = handshakeMsg.PeerID
 	//	if peer.RemotePeerID != handshakeMsg.PeerID {
@@ -544,7 +545,7 @@ func (peer *Peer) sendHandshake() error {
 		return errors.New("handshake send incomplete")
 	}
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sent handshake to peer(%s)...\n", peer.RemotePeerID)
+		fmt.Printf("Sent handshake to peer(%s)...\n", peer.RemoteIP)
 	}
 	if peer.bitField != nil && peer.bitField.NumSet > 0 {
 		err = peer.sendBitField()
@@ -667,7 +668,7 @@ func (peer *Peer) sendMessage(msg *message.Message) error {
 	const MESSAGE_SEND_TIMEOUT = 1000
 	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sending msg to peer(%s): ", peer.RemotePeerID)
+		fmt.Printf("Sending msg to peer(%s): ", peer.RemoteIP)
 		msg.Print()
 	}
 	msgBytes := msg.GetBytes()
@@ -761,13 +762,13 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	const MESSAGE_READ_TIMEOUT_MS = 1000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
 	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond)) // 20 ms read for message length
+	peer.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)) // 20 ms read for message length
 	n, err := peer.conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
 	}
 	if n != 4 {
-		return nil, fmt.Errorf("malformed message length read: 0x%x", msgLenBytes)
+		return nil, fmt.Errorf("malformed message length read(length %d): 0x%x", n, msgLenBytes)
 	}
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
@@ -797,7 +798,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 		return nil, err
 	}
 	if debugopts.PEER_DEBUG {
-		fmt.Printf("Peer (%s) Got message: ", peer.RemotePeerID)
+		fmt.Printf("Peer (%s) Got message: ", peer.RemoteIP)
 	}
 	msg.Print()
 	return msg, nil

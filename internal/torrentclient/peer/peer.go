@@ -75,6 +75,7 @@ type Peer struct {
 	RequestOutMax         int
 	ResponseOutMax        int
 	requestInQueue        []*BlockRequest
+	pendingRequestInQueue []*BlockRequest
 	requestOutQueue       []*BlockRequest
 	responseInQueue       []*BlockResponse
 	responseOutQueue      []*BlockResponse
@@ -228,11 +229,17 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	return nil
 }
 
-func (peer *Peer) GetRequestsIn() []*BlockRequest {
+func (peer *Peer) GetRequestsIn(n int) []*BlockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
+	m := n
+	if n > len(peer.requestInQueue) {
+		m = len(peer.requestInQueue)
+	}
+	ret := peer.requestInQueue[:m]
 
-	ret := peer.requestInQueue
+	peer.requestInQueue = peer.requestInQueue[m:]
+	peer.pendingRequestInQueue = append(peer.pendingRequestInQueue, ret...)
 
 	return ret
 }
@@ -640,6 +647,13 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			}
 			i++
 		}
+		for i < len(peer.pendingRequestInQueue) {
+			if peer.pendingRequestInQueue[i].Equal(req) {
+				peer.pendingRequestInQueue = append(peer.pendingRequestInQueue[:i], peer.pendingRequestInQueue[i+1:]...)
+				break
+			}
+			i++
+		}
 	case message.PORT:
 		// Not implemented
 	default:
@@ -713,7 +727,7 @@ func (peer *Peer) sendRequest(req *BlockRequest) error {
 
 func (peer *Peer) sendPiece(res *BlockResponse) error {
 	found := false
-	for _, req := range peer.requestInQueue {
+	for _, req := range peer.pendingRequestInQueue {
 		if res.EqualToReq(req) {
 			found = true
 			break

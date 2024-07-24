@@ -10,7 +10,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
 )
 
 func main() {
@@ -36,6 +36,8 @@ func main() {
 					panic("in peer test no torrent file specified")
 				}
 				TestSession(os.Args[4], myPeerID)
+			} else if testPkg == "tracker" {
+				TestTrackerList(os.Args[4], myPeerID)
 			} else {
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
@@ -44,6 +46,31 @@ func main() {
 			// Run server
 		}
 	}
+}
+
+func TestTrackerList(tfPath string, myPeerID string) {
+	tf, err := torrentfile.ParseFile(tfPath)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Torrentfile succesfully parsed")
+	bdl, err := bundle.NewBundle(tf, "./TestBundle", 20)
+	if err != nil {
+		panic(err)
+	}
+	dbc, err := database.Connect()
+	if err != nil {
+		panic(err)
+	}
+	defer dbc.Disconnect()
+	listenPort := uint16(6681)
+	tl := trackerlist.New(tf.Announce, tf.AnnounceList, bdl.InfoHash, listenPort, bdl.Length, false, myPeerID)
+	err = tl.Start()
+	if err != nil {
+		panic(err)
+	}
+	time.Sleep(10 * time.Second)
+	tl.Stop()
 }
 
 func TestSession(tfPath string, myPeerID string) {
@@ -61,7 +88,7 @@ func TestSession(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	defer dbc.Disconnect()
-	listenPort := 6681
+	listenPort := uint16(6681)
 	sesh, err := session.New(bdl, dbc, tf, listenPort, myPeerID)
 	if err != nil {
 		panic(err)
@@ -88,23 +115,20 @@ func TestPeer(tfPath string, myPeerID string) {
 	if err != nil {
 		panic(err)
 	}
-	trk := tracker.New(
-		tf.AnnounceList,
-		bdl.InfoHash,
-		6681,
-		0,
-		0,
-		bdl.Length,
-		myPeerID,
-	)
-	err = trk.Start()
+	tl := trackerlist.New(tf.Announce, tf.AnnounceList, bdl.InfoHash, 6681, bdl.Length, false, myPeerID)
+	err = tl.Start()
 	if err != nil {
 		fmt.Printf("Error starting tracker: %v\n", err)
 		return
 	}
-	defer trk.Stop()
+	defer tl.Stop()
 	var curPeer *peer.Peer
-	for _, peerDetails := range trk.Peers {
+	peers := tl.GetPeers()
+	for len(peers) == 0 {
+		time.Sleep(50 * time.Millisecond)
+		peers = tl.GetPeers()
+	}
+	for _, peerDetails := range peers {
 		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.IP)
 		curPeer, err = peer.Connect(
 			"",

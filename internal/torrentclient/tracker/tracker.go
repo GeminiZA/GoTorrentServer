@@ -25,24 +25,25 @@ type PeerInfo struct {
 
 type Tracker struct {
 	instantiated       bool
-	announcelist       [][]string
 	announceErrorCount int
 	TrackerUrl         string
 	InfoHash           []byte
-	Port               int
+	Port               uint16
 	TrackerID          string
-	Downloaded         int64
-	Uploaded           int64
-	Left               int64
+	downloaded         int64
+	uploaded           int64
+	left               int64
 	complete           bool
 	PeerID             string
 	Interval           time.Duration
 	MinInterval        time.Duration
 	Seeders            int64
 	Leechers           int64
-	Peers              []PeerInfo
+	Peers              []*PeerInfo
 	running            bool
+	Stopped            bool
 	lastAnnounce       time.Time
+	TrackerError       error
 	mux                sync.Mutex
 
 	// UDP announce
@@ -54,16 +55,15 @@ type Tracker struct {
 	timeoutStep          int
 }
 
-func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
+func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
 	return &Tracker{
 		InfoHash:           infoHash,
-		announcelist:       announcelist,
 		announceErrorCount: 0,
-		TrackerUrl:         "",
+		TrackerUrl:         url,
 		Port:               port,
-		Downloaded:         downloaded,
-		Uploaded:           uploaded,
-		Left:               left,
+		downloaded:         downloaded,
+		uploaded:           uploaded,
+		left:               left,
 		complete:           false,
 		PeerID:             peerId,
 		TrackerID:          "",
@@ -71,6 +71,7 @@ func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, u
 		Leechers:           0,
 		instantiated:       true,
 		running:            false,
+		Stopped:            false,
 
 		connectionID:         0,
 		udpConn:              nil,
@@ -81,11 +82,10 @@ func New(announcelist [][]string, infoHash []byte, port int, downloaded int64, u
 }
 
 func (tracker *Tracker) parseBody(body []byte) error {
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
 	bodyDict, err := bencode.Parse(&body)
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Successfully parsed body\n")
-		fmt.Printf("%v\n", bodyDict)
-	}
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 			}
 		}
 	}
-	tracker.Peers = make([]PeerInfo, 0)
+	tracker.Peers = make([]*PeerInfo, 0)
 	if peers, ok := bodyDict["peers"]; ok {
 		if peersListInter, ok := peers.([]interface{}); ok {
 			peersList := make([]map[string]interface{}, 0)
@@ -162,7 +162,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				if debugopts.TRACKER_DEBUG {
 					fmt.Printf("IP: %s; Port: %d\n", peerIP, int(peerPort))
 				}
-				tracker.Peers = append(tracker.Peers, PeerInfo{IP: peerIP, Port: int(peerPort)})
+				tracker.Peers = append(tracker.Peers, &PeerInfo{IP: peerIP, Port: int(peerPort)})
 			}
 		}
 	} else {
@@ -171,32 +171,24 @@ func (tracker *Tracker) parseBody(body []byte) error {
 	return nil
 }
 
-func (tracker *Tracker) Start() error {
+func (tracker *Tracker) Start() {
 	if !tracker.instantiated {
-		return errors.New("tracker incorrectly instantiated")
+		fmt.Printf("tracker incorrectly instantiated")
+		return
 	}
-
-	for _, list := range tracker.announcelist {
-		for _, url := range list {
-			tracker.TrackerUrl = url
-			err := tracker.announce(2)
-			if err != nil {
-				fmt.Printf("error announcing to tracker (%s): %v\n", url, err)
-			} else { // Successfully announced
-				tracker.running = true
-				go tracker.run()
-				return nil
-			}
-		}
+	err := tracker.announce(2)
+	if err != nil {
+		tracker.TrackerError = err
+		fmt.Printf("error announcing to tracker (%s): %v\n", tracker.TrackerUrl, err)
+	} else { // Successfully announced
+		tracker.Stopped = false
+		tracker.running = true
+		go tracker.run()
+		return
 	}
-
-	return errors.New("no more trackers to try")
 }
 
 func (tracker *Tracker) announce(event int) error {
-	tracker.mux.Lock()
-	defer tracker.mux.Unlock()
-
 	if strings.Contains(tracker.TrackerUrl, "udp://") {
 		err := tracker.udpAnnounce(event)
 		if err != nil {
@@ -208,10 +200,10 @@ func (tracker *Tracker) announce(event int) error {
 	params := url.Values{}
 	params.Add("info_hash", string(tracker.InfoHash))
 	params.Add("peer_id", tracker.PeerID)
-	params.Add("port", strconv.Itoa(tracker.Port))
-	params.Add("uploaded", strconv.FormatInt(tracker.Uploaded, 10))
-	params.Add("downloaded", strconv.FormatInt(tracker.Downloaded, 10))
-	params.Add("left", strconv.FormatInt(tracker.Left, 10))
+	params.Add("port", fmt.Sprintf("%d", tracker.Port))
+	params.Add("uploaded", strconv.FormatInt(tracker.uploaded, 10))
+	params.Add("downloaded", strconv.FormatInt(tracker.downloaded, 10))
+	params.Add("left", strconv.FormatInt(tracker.left, 10))
 	params.Add("compact", "0")
 	switch event {
 	case 0:
@@ -224,12 +216,17 @@ func (tracker *Tracker) announce(event int) error {
 		params.Add("event", "stopped")
 	}
 
+	if debugopts.TRACKER_DEBUG {
+		fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
+	}
 	res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
 	if err != nil {
 		return err
 	}
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
+
+	if event == 3 {
+		res.Body.Close()
+		return nil
 	}
 
 	defer res.Body.Close()
@@ -271,59 +268,64 @@ func (tracker *Tracker) Complete() error {
 	return nil
 }
 
-func (tracker *Tracker) Stop() error {
-	tracker.mux.Lock()
-	defer tracker.mux.Unlock()
-
+func (tracker *Tracker) Stop() {
 	if !tracker.running {
-		return errors.New("tracker not running")
+		return
 	}
 
+	tracker.mux.Lock()
 	tracker.running = false
+	tracker.mux.Unlock()
+
+	if debugopts.TRACKER_DEBUG {
+		fmt.Printf("Tracker(%s) stopping...\n", tracker.TrackerUrl)
+	}
 
 	err := tracker.announce(3)
 	if err != nil {
-		return err
+		fmt.Printf("error stopping tracker(%s): %v\n", tracker.TrackerUrl, err)
 	}
+	tracker.mux.Lock()
+	tracker.Stopped = true
+	tracker.mux.Unlock()
+}
 
-	return nil
+func (tracker *Tracker) SetDownloaded(downloaded int64) {
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
+	tracker.downloaded = downloaded
+}
+
+func (tracker *Tracker) SetUploaded(uploaded int64) {
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
+	tracker.uploaded = uploaded
+}
+
+func (tracker *Tracker) SetLeft(left int64) {
+	tracker.mux.Lock()
+	defer tracker.mux.Unlock()
+
+	tracker.left = left
 }
 
 func (tracker *Tracker) run() {
 	for tracker.running {
+		if debugopts.TRACKER_DEBUG {
+			fmt.Printf("Tracker(%s) running...\n", tracker.TrackerUrl)
+		}
 		time.Sleep(time.Second)
 		if tracker.announceErrorCount > 0 || tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
 			err := tracker.announce(0)
 			if err != nil {
+				tracker.TrackerError = err
 				tracker.announceErrorCount++
 				fmt.Printf("Error in tracker running (%d/5): %v\n", tracker.announceErrorCount, err)
-				if tracker.announceErrorCount > 5 { // Get new tracker
-					fmt.Print("Getting new tracker...\n")
-					found := false
-					connected := false
-					for _, list := range tracker.announcelist {
-						if connected {
-							break
-						}
-						for _, url := range list {
-							if connected {
-								break
-							}
-							if found {
-								tracker.TrackerUrl = url
-								err := tracker.announce(0)
-								if err == nil {
-									connected = true
-								} else {
-									fmt.Printf("error announcing to tracker(%s): %v\n", url, err)
-								}
-							} else {
-								if url == tracker.TrackerUrl {
-									found = true
-								}
-							}
-						}
-					}
+				if tracker.announceErrorCount > 5 {
+					fmt.Printf("Stopping tracker: %s\n", tracker.TrackerUrl)
+					return
 				}
 			} else {
 				tracker.announceErrorCount = 0
@@ -356,9 +358,9 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 	binary.BigEndian.PutUint32(announceBytes[12:], transactionID)
 	copy(announceBytes[16:36], tracker.InfoHash)
 	copy(announceBytes[36:56], []byte(tracker.PeerID))
-	binary.BigEndian.PutUint64(announceBytes[56:], uint64(tracker.Downloaded))
-	binary.BigEndian.PutUint64(announceBytes[64:], uint64(tracker.Left))
-	binary.BigEndian.PutUint64(announceBytes[72:], uint64(tracker.Uploaded))
+	binary.BigEndian.PutUint64(announceBytes[56:], uint64(tracker.downloaded))
+	binary.BigEndian.PutUint64(announceBytes[64:], uint64(tracker.left))
+	binary.BigEndian.PutUint64(announceBytes[72:], uint64(tracker.uploaded))
 	binary.BigEndian.PutUint32(announceBytes[80:], uint32(event))      // event 0: none; 1: completed; 2: started; 3: stopped;
 	binary.BigEndian.PutUint32(announceBytes[84:], 0)                  // ip address // default: 0
 	binary.BigEndian.PutUint32(announceBytes[88:], uint32(rand.Int())) // key // used for ipv6
@@ -423,7 +425,7 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 	if debugopts.TRACKER_DEBUG {
 		fmt.Printf("Got: \nAction: %d\nTransactionID: 0x%x\nInterval: %d\nLeechers: %d\nSeeders: %d\nGetting peers...\n", responseAction, responseTransactionID, responseInterval, responseLeechers, responseSeeders)
 	}
-	newPeers := make([]PeerInfo, 0)
+	newPeers := make([]*PeerInfo, 0)
 	for curByteIndex := 20; curByteIndex+6 <= responseLength; curByteIndex += 6 {
 		newPeerIPBytes := responseBuffer[curByteIndex : curByteIndex+4]
 		newPeerIPStr := fmt.Sprintf("%d.%d.%d.%d", newPeerIPBytes[0], newPeerIPBytes[1], newPeerIPBytes[2], newPeerIPBytes[3])
@@ -440,7 +442,7 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 			}
 		}
 		if !found {
-			newPeer := PeerInfo{
+			newPeer := &PeerInfo{
 				IP:   newPeerIPStr,
 				Port: newPeerPort,
 			}

@@ -11,20 +11,21 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
 )
 
 type Session struct {
-	bundle  *bundle.Bundle
-	dbc     *database.DBConn
-	tracker *tracker.Tracker
-	tf      *torrentfile.TorrentFile
+	bundle      *bundle.Bundle
+	dbc         *database.DBConn
+	trackerList *trackerlist.TrackerList
+	tf          *torrentfile.TorrentFile
 
 	maxDownloadRateKB float64
 	maxUploadRateKB   float64
 
 	peers []*peer.Peer
 
-	listenPort int
+	listenPort uint16
 	peerID     string
 	maxPeers   int
 
@@ -40,7 +41,7 @@ type Session struct {
 
 // Exported
 
-func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, listenPort int, peerID string) (*Session, error) {
+func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, listenPort uint16, peerID string) (*Session, error) {
 	session := Session{
 		peers:             make([]*peer.Peer, 0),
 		bundle:            bnd,
@@ -57,12 +58,20 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		blockQueueMax:     50,
 		running:           false,
 	}
-	session.tracker = tracker.New(tf.AnnounceList, tf.InfoHash, listenPort, 0, 0, 0, peerID)
+	session.trackerList = trackerlist.New(
+		tf.Announce,
+		tf.AnnounceList,
+		bnd.InfoHash,
+		listenPort,
+		(bnd.NumPieces-bnd.Bitfield.NumSet)*bnd.PieceLength,
+		bnd.Complete,
+		peerID,
+	)
 	return &session, nil
 }
 
 func (session *Session) Start() error {
-	err := session.tracker.Start()
+	err := session.trackerList.Start()
 	if err != nil {
 		return fmt.Errorf("error starting tracker in session: %v", err)
 	}
@@ -75,13 +84,9 @@ func (session *Session) Start() error {
 
 func (session *Session) Stop() {
 	session.running = false
-	err := session.tracker.Stop()
-	if err != nil {
-		fmt.Printf("Error stopping tracker: %v\n", err)
-	}
+	session.trackerList.Stop()
 	for len(session.peers) > 0 {
-		session.peers[0].Close()
-		session.peers = session.peers[1:]
+		go session.peers[0].Close()
 	}
 }
 
@@ -178,8 +183,7 @@ func (session *Session) run() {
 			// Check for requests
 			if session.maxUploadRateKB == 0 || session.uploadRateKB < session.maxUploadRateKB {
 				for _, curPeer := range session.peers {
-					requests := curPeer.GetRequestsIn()
-					responses := make([]*peer.BlockResponse, 0)
+					requests := curPeer.GetRequestsIn(curPeer.NumResponsesOut() - curPeer.ResponseOutMax)
 					for _, req := range requests {
 						if curPeer.NumResponsesOut() == curPeer.ResponseOutMax {
 							break
@@ -189,7 +193,7 @@ func (session *Session) run() {
 							fmt.Printf("err loading block: (%d, %d, %d) for response: %v\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, err)
 							continue
 						}
-						responses = append(responses, &peer.BlockResponse{
+						curPeer.QueueResponseOut(&peer.BlockResponse{
 							PieceIndex:  uint32(req.Info.PieceIndex),
 							BeginOffset: uint32(req.Info.BeginOffset),
 							Block:       nextResponse,
@@ -248,7 +252,7 @@ func (session *Session) run() {
 }
 
 func (session *Session) findNewPeer() {
-	for _, peerInfo := range session.tracker.Peers {
+	for _, peerInfo := range session.trackerList.GetPeers() {
 		session.connectPeer(peerInfo)
 	}
 }
@@ -267,7 +271,7 @@ func (session *Session) fetchBlockInfos() {
 	}
 }
 
-func (session *Session) connectPeer(pi tracker.PeerInfo) error {
+func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 	for _, peer := range session.peers {
 		if peer.RemoteIP == pi.IP && peer.RemotePort == pi.Port {
 			return errors.New("peer already connected")

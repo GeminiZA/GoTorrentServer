@@ -29,24 +29,36 @@ type Session struct {
 	timeLastRequestsQueued  time.Time
 	timeLastResponsesQueued time.Time
 
-	Peers           []*peer.Peer
-	PeersInfo       []*tracker.PeerInfo
-	ConnectingPeers []*tracker.PeerInfo
+	Peers            []*peer.Peer
+	UnconnectedPeers []*tracker.PeerInfo
+	ConnectedPeers   []*tracker.PeerInfo
+	ConnectingPeers  []*tracker.PeerInfo
 
 	listenPort uint16
 	peerID     string
 	maxPeers   int
-	numPeers   int
 
 	downloadRateKB float64
 	uploadRateKB   float64
 
-	blockQueue    []*peer.BlockRequest
+	blockQueue    []*blockRequest
 	blockQueueMax int
 	numBlocksSent int
 
 	running bool
 	mux     sync.Mutex
+}
+
+type blockRequest struct {
+	Info     bundle.BlockInfo
+	Sent     bool
+	Rejected []string
+}
+
+func (bra *blockRequest) Equal(brb *blockRequest) bool {
+	return bra.Info.BeginOffset == brb.Info.BeginOffset &&
+		bra.Info.PieceIndex == brb.Info.PieceIndex &&
+		bra.Info.Length == brb.Info.Length
 }
 
 // Exported
@@ -65,11 +77,10 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		timeLastResponsesQueued: time.Now(),
 		maxRequestsOutRate:      0,
 		maxResponsesOutRate:     0,
-		maxPeers:                20,
-		numPeers:                0,
+		maxPeers:                1,
 		downloadRateKB:          0,
 		uploadRateKB:            0,
-		blockQueue:              make([]*peer.BlockRequest, 0),
+		blockQueue:              make([]*blockRequest, 0),
 		blockQueueMax:           50,
 		running:                 false,
 	}
@@ -187,10 +198,10 @@ func (session *Session) run() {
 
 			// Check for new peers to connect to
 			session.UpdatePeerInfo()
-			if session.numPeers < session.maxPeers && session.numPeers < len(session.PeersInfo) {
-				if debugopts.SESSION_DEBUG {
-					fmt.Printf("Session checking for new peers(%d/%d)...\n", session.numPeers, session.maxPeers)
-				}
+			if debugopts.SESSION_DEBUG {
+				fmt.Printf("Current peers (max %d): \nConnected: %d\nConnecting: %d\nUnconnected: %d\n", session.maxPeers, len(session.ConnectedPeers), len(session.ConnectingPeers), len(session.UnconnectedPeers))
+			}
+			if len(session.ConnectedPeers)+len(session.ConnectingPeers) < session.maxPeers && len(session.UnconnectedPeers) > 0 {
 				go session.findNewPeer()
 			}
 
@@ -198,7 +209,7 @@ func (session *Session) run() {
 				fmt.Printf("Session Rates: Down: %f KB/s Up: %f KB/s\n", session.downloadRateKB, session.uploadRateKB)
 			}
 
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 		}
 	}
 }
@@ -206,8 +217,39 @@ func (session *Session) run() {
 func (session *Session) UpdatePeerInfo() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
+	newPeers := session.trackerList.GetPeers()
 
-	session.PeersInfo = session.trackerList.GetPeers()
+	for _, newPeer := range newPeers {
+		found := false
+		for _, connectedPeer := range session.ConnectedPeers {
+			if connectedPeer.IP == newPeer.IP && connectedPeer.Port == newPeer.Port {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		for _, unconnectedPeer := range session.UnconnectedPeers {
+			if unconnectedPeer.IP == newPeer.IP && unconnectedPeer.Port == newPeer.Port {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		for _, connectingPeer := range session.ConnectingPeers {
+			if connectingPeer.IP == newPeer.IP && connectingPeer.Port == newPeer.Port {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		session.UnconnectedPeers = append(session.UnconnectedPeers, newPeer)
+	}
 }
 
 func (session *Session) getBlocksFromBundle() {
@@ -217,12 +259,12 @@ func (session *Session) getBlocksFromBundle() {
 	if len(session.blockQueue) < session.blockQueueMax {
 		space := session.blockQueueMax - len(session.blockQueue)
 		blocksToRequest := session.bundle.NextNBlocks(space)
-		requestsToAdd := make([]*peer.BlockRequest, 0)
+		requestsToAdd := make([]*blockRequest, 0)
 		for _, block := range blocksToRequest {
-			newReq := &peer.BlockRequest{
-				Info:    *block,
-				ReqTime: time.Time{},
-				Sent:    false,
+			newReq := &blockRequest{
+				Info:     *block,
+				Rejected: make([]string, 0),
+				Sent:     false,
 			}
 			requestsToAdd = append(requestsToAdd, newReq)
 		}
@@ -256,11 +298,11 @@ func (session *Session) checkRequests() {
 					fmt.Printf("err loading block: (%d, %d, %d) for response: %v\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, err)
 					continue
 				}
-				curPeer.QueueResponseOut(&peer.BlockResponse{
-					PieceIndex:  uint32(req.Info.PieceIndex),
-					BeginOffset: uint32(req.Info.BeginOffset),
-					Block:       nextResponse,
-				})
+				curPeer.QueueResponseOut(
+					uint32(req.Info.PieceIndex),
+					uint32(req.Info.BeginOffset),
+					nextResponse,
+				)
 				added = true
 			}
 		}
@@ -289,7 +331,7 @@ func (session *Session) checkResponses() {
 					session.bundle.CancelBlock(&bi)
 				}
 				i := 0
-				req := &peer.BlockRequest{Info: bi, Sent: false, ReqTime: time.Time{}}
+				req := &blockRequest{Info: bi, Sent: false}
 				for i < len(session.blockQueue) {
 					if session.blockQueue[i].Equal(req) {
 						session.blockQueue = append(session.blockQueue[:i], session.blockQueue[i+1:]...)
@@ -322,9 +364,10 @@ func (session *Session) checkCancelled() {
 			for _, req := range cancelled {
 				i := 0
 				for i < len(session.blockQueue) {
-					if req.Equal(session.blockQueue[i]) {
-						session.bundle.CancelBlock(&req.Info)
-						session.blockQueue = append(session.blockQueue[:i], session.blockQueue[i+1:]...)
+					if req.Info.PieceIndex == session.blockQueue[i].Info.PieceIndex &&
+						req.Info.BeginOffset == session.blockQueue[i].Info.BeginOffset &&
+						req.Info.Length == session.blockQueue[i].Info.Length {
+						session.blockQueue[i].Rejected = append(session.blockQueue[i].Rejected, curPeer.RemotePeerID)
 						break
 					}
 					i++
@@ -363,7 +406,15 @@ func (session *Session) assignParts() {
 				curRequestIndex := 0
 				for numAdded < numCanAdd && curRequestIndex < len(session.blockQueue) {
 					curBlockReq := session.blockQueue[curRequestIndex]
+					rejected := false
+					for _, rej := range curBlockReq.Rejected {
+						if rej == curPeer.RemotePeerID {
+							rejected = true
+							break
+						}
+					}
 					if !curBlockReq.Sent &&
+						!rejected &&
 						curPeer.HasPiece(curBlockReq.Info.PieceIndex) {
 						session.numBlocksSent++
 						curPeer.QueueRequestOut(curBlockReq.Info)
@@ -394,59 +445,59 @@ func (session *Session) fetchBlockInfos() {
 		blocksNeeded := session.blockQueueMax - len(session.blockQueue)
 		addedBlocks := session.bundle.NextNBlocks(blocksNeeded)
 		for _, bi := range addedBlocks {
-			session.blockQueue = append(session.blockQueue, &peer.BlockRequest{Info: *bi, Sent: false, ReqTime: time.Time{}})
+			session.blockQueue = append(session.blockQueue, &blockRequest{Info: *bi, Sent: false})
 		}
 	}
 }
 
 func (session *Session) findNewPeer() {
-	if len(session.PeersInfo) == 0 {
+	if len(session.UnconnectedPeers) == 0 {
 		return
 	}
-	for _, peerInfo := range session.PeersInfo {
-		found := false
-		for _, conPeerInfo := range session.ConnectingPeers {
-			if conPeerInfo.IP == peerInfo.IP && conPeerInfo.Port == peerInfo.Port {
-				found = true
-				break
-			}
-		}
-		if found {
-			continue
-		}
-		for _, curPeer := range session.Peers {
-			if peerInfo.IP == curPeer.RemoteIP && peerInfo.Port == curPeer.RemotePort {
-				found = true
-				break
-			}
-		}
-		if found {
-			continue
-		}
+	j := 0
+	for j < len(session.UnconnectedPeers) {
 		session.mux.Lock()
+		peerInfo := session.UnconnectedPeers[j]
+		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
+		session.UnconnectedPeers = append(session.UnconnectedPeers[:j], session.UnconnectedPeers[j+1:]...)
 		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
 		session.mux.Unlock()
+		if debugopts.SESSION_DEBUG {
+			fmt.Printf("session trying to connect to peer(%s:%d)...\n", peerInfo.IP, peerInfo.Port)
+		}
 		err := session.connectPeer(peerInfo)
 		if err != nil {
+			session.mux.Lock()
 			i := 0
 			for i < len(session.ConnectingPeers) {
 				if session.ConnectingPeers[i].IP == peerInfo.IP && session.ConnectingPeers[i].Port == peerInfo.Port {
 					session.ConnectingPeers = append(session.ConnectingPeers[:i], session.ConnectingPeers[i+1:]...)
+					session.UnconnectedPeers = append(session.UnconnectedPeers, peerInfo)
 					break
 				}
+				i++
 			}
-			fmt.Printf("%v\n", err)
+			j++
+			session.mux.Unlock()
+			fmt.Printf("Session error connecting to peer: %v\n", err)
 		} else {
+			session.mux.Lock()
+			i := 0
+			for i < len(session.ConnectingPeers) {
+				if session.ConnectingPeers[i].IP == peerInfo.IP && session.ConnectingPeers[i].Port == peerInfo.Port {
+					session.ConnectingPeers = append(session.ConnectingPeers[:i], session.ConnectingPeers[i+1:]...)
+					session.ConnectedPeers = append(session.ConnectedPeers, peerInfo)
+					break
+				}
+				i++
+			}
+			session.mux.Unlock()
 			break
 		}
 	}
 }
 
 func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
-	session.mux.Lock()
-	session.numPeers++
-	session.mux.Unlock()
-
 	for _, peer := range session.Peers {
 		if peer.RemoteIP == pi.IP && peer.RemotePort == pi.Port {
 			return errors.New("peer already connected")
@@ -462,9 +513,6 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 		session.bundle.NumPieces,
 	)
 	if err != nil {
-		session.mux.Lock()
-		session.numPeers--
-		session.mux.Unlock()
 		return err
 	}
 	session.Peers = append(session.Peers, peer)

@@ -19,31 +19,31 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 )
 
-type BlockResponse struct {
+type blockResponse struct {
 	PieceIndex  uint32
 	BeginOffset uint32
 	Block       []byte
 }
 
-func (res *BlockResponse) EqualToReq(req *BlockRequest) bool {
+func (res *blockResponse) EqualToReq(req *blockRequest) bool {
 	return res.BeginOffset == uint32(req.Info.BeginOffset) &&
 		res.PieceIndex == uint32(req.Info.PieceIndex) &&
 		len(res.Block) == int(req.Info.Length)
 }
 
-func (resa *BlockResponse) Equal(resb *BlockResponse) bool {
+func (resa *blockResponse) Equal(resb *blockResponse) bool {
 	return resa.BeginOffset == resb.BeginOffset &&
 		resa.PieceIndex == resb.PieceIndex &&
 		len(resa.Block) == len(resb.Block)
 }
 
-type BlockRequest struct {
+type blockRequest struct {
 	Info    bundle.BlockInfo
 	ReqTime time.Time
 	Sent    bool
 }
 
-func (bra *BlockRequest) Equal(brb *BlockRequest) bool {
+func (bra *blockRequest) Equal(brb *blockRequest) bool {
 	return bra.Info.BeginOffset == brb.Info.BeginOffset &&
 		bra.Info.PieceIndex == brb.Info.PieceIndex &&
 		bra.Info.Length == brb.Info.Length
@@ -74,12 +74,12 @@ type Peer struct {
 	// Queues
 	RequestsOutMax        int
 	ResponsesOutMax       int
-	requestInQueue        []*BlockRequest
-	pendingRequestInQueue []*BlockRequest
-	requestOutQueue       []*BlockRequest
-	responseInQueue       []*BlockResponse
-	responseOutQueue      []*BlockResponse
-	requestCancelledQueue []*BlockRequest
+	requestInQueue        []*blockRequest
+	pendingRequestInQueue []*blockRequest
+	requestOutQueue       []*blockRequest
+	responseInQueue       []*blockResponse
+	responseOutQueue      []*blockResponse
+	requestCancelledQueue []*blockRequest
 	// RateKB
 	TotalBytesUploaded   int64
 	TotalBytesDownloaded int64
@@ -122,11 +122,11 @@ func Connect(
 		// Queues
 		RequestsOutMax:        30,
 		ResponsesOutMax:       30,
-		requestInQueue:        make([]*BlockRequest, 0),
-		requestOutQueue:       make([]*BlockRequest, 0),
-		responseOutQueue:      make([]*BlockResponse, 0),
-		responseInQueue:       make([]*BlockResponse, 0),
-		requestCancelledQueue: make([]*BlockRequest, 0),
+		requestInQueue:        make([]*blockRequest, 0),
+		requestOutQueue:       make([]*blockRequest, 0),
+		responseOutQueue:      make([]*blockResponse, 0),
+		responseInQueue:       make([]*blockResponse, 0),
+		requestCancelledQueue: make([]*blockRequest, 0),
 		// RateKBs
 		lastDownloadUpdate:   time.Now(),
 		lastUploadUpdate:     time.Now(),
@@ -215,7 +215,7 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	newReq := &BlockRequest{
+	newReq := &blockRequest{
 		Info:    bi,
 		Sent:    false,
 		ReqTime: time.Time{},
@@ -229,7 +229,7 @@ func (peer *Peer) QueueRequestOut(bi bundle.BlockInfo) error {
 	return nil
 }
 
-func (peer *Peer) GetRequestsIn(n int) []*BlockRequest {
+func (peer *Peer) GetRequestsIn(n int) []*blockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 	ret := peer.requestInQueue[:n]
@@ -240,9 +240,15 @@ func (peer *Peer) GetRequestsIn(n int) []*BlockRequest {
 	return ret
 }
 
-func (peer *Peer) QueueResponseOut(res *BlockResponse) error {
+func (peer *Peer) QueueResponseOut(pieceIndex uint32, beginOffest uint32, block []byte) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
+
+	res := &blockResponse{
+		PieceIndex:  pieceIndex,
+		BeginOffset: beginOffest,
+		Block:       block,
+	}
 
 	exists := false
 	for _, req := range peer.requestInQueue {
@@ -278,7 +284,7 @@ func (peer *Peer) NumRequestsCancelled() int {
 	return len(peer.requestCancelledQueue)
 }
 
-func (peer *Peer) GetResponsesIn() []*BlockResponse {
+func (peer *Peer) GetResponsesIn() []*blockResponse {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
@@ -286,12 +292,12 @@ func (peer *Peer) GetResponsesIn() []*BlockResponse {
 		return nil
 	}
 	ret := peer.responseInQueue
-	peer.responseInQueue = make([]*BlockResponse, 0)
+	peer.responseInQueue = make([]*blockResponse, 0)
 
 	return ret
 }
 
-func (peer *Peer) GetCancelledRequests() []*BlockRequest {
+func (peer *Peer) GetCancelledRequests() []*blockRequest {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
@@ -300,7 +306,7 @@ func (peer *Peer) GetCancelledRequests() []*BlockRequest {
 	}
 
 	ret := peer.requestCancelledQueue
-	peer.requestCancelledQueue = make([]*BlockRequest, 0)
+	peer.requestCancelledQueue = make([]*blockRequest, 0)
 
 	return ret
 }
@@ -329,7 +335,7 @@ func (peer *Peer) CancelRequest(bi *bundle.BlockInfo) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	newReq := &BlockRequest{
+	newReq := &blockRequest{
 		Info:    *bi,
 		Sent:    false,
 		ReqTime: time.Time{},
@@ -369,7 +375,7 @@ func (peer *Peer) run() {
 		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
 			// Cancel all requests
 			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
-			peer.requestOutQueue = make([]*BlockRequest, 0)
+			peer.requestOutQueue = make([]*blockRequest, 0)
 			peer.Close()
 			break
 		}
@@ -575,7 +581,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.RemoteInterested = true
 	case message.NOT_INTERESTED:
 		peer.RemoteInterested = false
-		peer.requestInQueue = make([]*BlockRequest, 0)
+		peer.requestInQueue = make([]*blockRequest, 0)
 	case message.HAVE:
 		peer.remoteBitfield.SetBit(int64(msg.Index))
 	case message.BITFIELD:
@@ -584,7 +590,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		if !peer.RemoteInterested || peer.AmChoking {
 			return nil
 		}
-		newReq := &BlockRequest{
+		newReq := &blockRequest{
 			Info: bundle.BlockInfo{
 				PieceIndex:  int64(msg.Index),
 				BeginOffset: int64(msg.Begin),
@@ -605,7 +611,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.requestInQueue = append(peer.requestInQueue, newReq)
 	case message.PIECE:
 		peer.bytesDownloaded += int64(len(msg.Piece))
-		newRes := &BlockResponse{
+		newRes := &blockResponse{
 			PieceIndex:  msg.Index,
 			BeginOffset: msg.Begin,
 			Block:       msg.Piece,
@@ -627,7 +633,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.responseInQueue = append(peer.responseInQueue, newRes)
 		fmt.Printf("Response added to responseInQueue\n")
 	case message.CANCEL:
-		req := &BlockRequest{
+		req := &blockRequest{
 			Info: bundle.BlockInfo{
 				PieceIndex:  int64(msg.Index),
 				BeginOffset: int64(msg.Begin),
@@ -718,11 +724,11 @@ func (peer *Peer) sendBitField() error {
 	return peer.sendMessage(message.NewBitfield(peer.bitField.Bytes))
 }
 
-func (peer *Peer) sendRequest(req *BlockRequest) error {
+func (peer *Peer) sendRequest(req *blockRequest) error {
 	return peer.sendMessage(message.NewRequest(&req.Info))
 }
 
-func (peer *Peer) sendPiece(res *BlockResponse) error {
+func (peer *Peer) sendPiece(res *blockResponse) error {
 	found := false
 	for _, req := range peer.pendingRequestInQueue {
 		if res.EqualToReq(req) {
@@ -738,7 +744,7 @@ func (peer *Peer) sendPiece(res *BlockResponse) error {
 	return peer.sendMessage(message.NewPiece(res.PieceIndex, res.BeginOffset, res.Block))
 }
 
-func (peer *Peer) sendCancel(req *BlockRequest) error {
+func (peer *Peer) sendCancel(req *blockRequest) error {
 	i := 0
 	found := false
 	for i < len(peer.requestOutQueue) {
@@ -762,7 +768,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	const MESSAGE_READ_TIMEOUT_MS = 1000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
 	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)) // 20 ms read for message length
+	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond)) // 20 ms read for message length
 	n, err := peer.conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
@@ -772,7 +778,9 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	}
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
-		return nil, errors.New("message length exceeds max of 17kb")
+		fmt.Printf("%x\n", msgLenBytes)
+		panic("message length exceeds max")
+		// return nil, errors.New("message length exceeds max of 17kb")
 	}
 	if debugopts.PEER_DEBUG {
 		fmt.Printf("Message Length read: %d (0x%x)\n", msgLen, msgLenBytes)

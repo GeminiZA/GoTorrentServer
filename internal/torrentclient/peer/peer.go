@@ -120,8 +120,8 @@ func Connect(
 		RemoteInterested: false,
 		RemoteChoking:    true,
 		// Queues
-		RequestsOutMax:        30,
-		ResponsesOutMax:       30,
+		RequestsOutMax:        10,
+		ResponsesOutMax:       10,
 		requestInQueue:        make([]*blockRequest, 0),
 		requestOutQueue:       make([]*blockRequest, 0),
 		responseOutQueue:      make([]*blockResponse, 0),
@@ -161,8 +161,10 @@ func Connect(
 	peer.Keepalive = true
 	peer.Connected = true
 	peer.TimeConnected = time.Now()
+	peer.conn.SetReadDeadline(time.Time{})
 
-	go peer.run()
+	go peer.runIncoming()
+	go peer.runOutgoing()
 
 	return &peer, nil
 }
@@ -361,24 +363,20 @@ func (peer *Peer) Have(pieceIndex int64) error {
 	return nil
 }
 
-func (peer *Peer) run() {
-	// Read bitfield
-
-	const BLOCK_REQUEST_TIMEOUT_MS = 2000
+func (peer *Peer) runOutgoing() {
+	const BLOCK_REQUEST_TIMEOUT_MS = 5000
+	var err error
 	for peer.Connected {
 		peer.UpdateRates()
 
-		var err error
-
 		// Check if alive
-
 		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
 			// Cancel all requests
 			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
 			peer.requestOutQueue = make([]*blockRequest, 0)
 			peer.Close()
 			break
-		}
+		} // end check if alive
 
 		// If client has all pieces of remote peer no longer interested
 		if peer.bitField != nil &&
@@ -386,36 +384,6 @@ func (peer *Peer) run() {
 			peer.AmInterested &&
 			peer.bitField.HasAll(peer.remoteBitfield) {
 			peer.sendNotInterested()
-		}
-
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Requests out queue:")
-			for _, req := range peer.requestOutQueue {
-				fmt.Printf("(%d, %d, %d) (sent: %v)\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, req.Sent)
-			}
-			fmt.Println("Reading messages in...")
-		}
-
-		// Process messages in
-		for numReads := 0; numReads < 15; numReads++ {
-			msgIn, err := peer.readMessage()
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					break
-					// fmt.Println("No new message")
-				} else {
-					fmt.Println("Error reading message from peer: ", err)
-				}
-			} else {
-				err = peer.handleMessageIn(msgIn)
-				if err != nil {
-					fmt.Println("Error handling message from peer: ", err)
-				}
-			}
-		}
-
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Done reading messages in...")
 		}
 
 		// Process messages out
@@ -437,7 +405,6 @@ func (peer *Peer) run() {
 				}
 			}
 		}
-
 		if debugopts.PEER_DEBUG {
 			fmt.Println("Done sending requests out...")
 		}
@@ -453,12 +420,11 @@ func (peer *Peer) run() {
 				}
 			}
 		}
-
 		if debugopts.PEER_DEBUG {
 			fmt.Println("Done sending responses out...")
 		}
 
-		// Keep alive
+		// Send keep alive
 		if time.Now().After(peer.timeLastSent.Add(20 * time.Second)) {
 			err = peer.sendKeepAlive()
 			if err != nil {
@@ -467,7 +433,6 @@ func (peer *Peer) run() {
 		}
 
 		// Handle timed pieces
-
 		i := 0
 		for i < len(peer.requestOutQueue) {
 			if peer.requestOutQueue[i].Sent && time.Now().After(peer.requestOutQueue[i].ReqTime.Add(BLOCK_REQUEST_TIMEOUT_MS*time.Millisecond)) {
@@ -481,6 +446,32 @@ func (peer *Peer) run() {
 		if debugopts.PEER_DEBUG {
 			fmt.Println("Done handling timed pieces...")
 		}
+
+		time.Sleep(100 * time.Millisecond)
+
+	}
+}
+
+func (peer *Peer) runIncoming() {
+	for peer.Connected {
+		// Process messages in
+		for numReads := 0; numReads < 15; numReads++ {
+			msgIn, err := peer.readMessage()
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					break
+					// fmt.Println("No new message")
+				} else {
+					fmt.Println("Error reading message from peer: ", err)
+				}
+			} else {
+				err = peer.handleMessageIn(msgIn)
+				if err != nil {
+					fmt.Println("Error handling message from peer: ", err)
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -765,10 +756,10 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if !peer.Connected {
 		return nil, nil
 	}
-	const MESSAGE_READ_TIMEOUT_MS = 1000
+	const MESSAGE_READ_TIMEOUT_MS = 2000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
+	// peer.conn.SetReadDeadline(time.Time{})
 	msgLenBytes := make([]byte, 4)
-	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond)) // 20 ms read for message length
 	n, err := peer.conn.Read(msgLenBytes)
 	if err != nil {
 		return nil, err
@@ -788,7 +779,7 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if msgLen == 0 {
 		return message.NewKeepAlive(), nil
 	}
-	peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
+	// peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
 	msgBytes := make([]byte, 0)
 	bytesRead := 0
 	for len(msgBytes) < msgLen {

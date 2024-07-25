@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
@@ -41,8 +42,8 @@ type Session struct {
 	downloadRateKB float64
 	uploadRateKB   float64
 
-	blockQueue    []*blockRequest
-	blockQueueMax int
+	BlockQueue    []*blockRequest
+	BlockQueueMax int
 	numBlocksSent int
 
 	running bool
@@ -53,6 +54,7 @@ type blockRequest struct {
 	Info     bundle.BlockInfo
 	Sent     bool
 	Rejected []string
+	SentToID string
 }
 
 func (bra *blockRequest) Equal(brb *blockRequest) bool {
@@ -77,11 +79,11 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		timeLastResponsesQueued: time.Now(),
 		maxRequestsOutRate:      0,
 		maxResponsesOutRate:     0,
-		maxPeers:                1,
+		maxPeers:                10,
 		downloadRateKB:          0,
 		uploadRateKB:            0,
-		blockQueue:              make([]*blockRequest, 0),
-		blockQueueMax:           50,
+		BlockQueue:              make([]*blockRequest, 0),
+		BlockQueueMax:           50,
 		running:                 false,
 	}
 	session.trackerList = trackerlist.New(
@@ -162,7 +164,7 @@ func (session *Session) run() {
 			session.getBlocksFromBundle()
 
 			if debugopts.SESSION_DEBUG {
-				fmt.Printf("Session blockqueue length: %d\n", len(session.blockQueue))
+				fmt.Printf("Session blockqueue length: %d\n", len(session.BlockQueue))
 			}
 
 			session.assignParts()
@@ -183,7 +185,7 @@ func (session *Session) run() {
 
 			// Check for weird peers
 			for _, curPeer := range session.Peers {
-				if time.Now().After(curPeer.TimeConnected.Add(time.Second*20)) && curPeer.DownloadRateKB < 1 {
+				if time.Now().After(curPeer.TimeConnected.Add(time.Second*20)) && curPeer.TotalBytesDownloaded < 1 {
 					session.disconnectPeer(curPeer.RemotePeerID)
 				}
 			}
@@ -209,9 +211,26 @@ func (session *Session) run() {
 				fmt.Printf("Session Rates: Down: %f KB/s Up: %f KB/s\n", session.downloadRateKB, session.uploadRateKB)
 			}
 
-			time.Sleep(1000 * time.Millisecond)
+			if debugopts.SESSION_DEBUG_simple {
+				fmt.Printf("Session:\nDownloadRate: %f kbps\nUploadRate: %f kbps\nQueueLength: %d\nPeers:\n\tID\t\t\tIP\t\tPort\tDownloaded\tUploaded\n", session.downloadRateKB, session.uploadRateKB, len(session.BlockQueue))
+				for _, curPeer := range session.Peers {
+					fmt.Printf("\t%s\t%s\t%d\t%d\t\t%d\n", sanitize(curPeer.RemotePeerID), curPeer.RemoteIP, curPeer.RemotePort, curPeer.TotalBytesDownloaded, curPeer.TotalBytesUploaded)
+				}
+			}
+
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
+}
+
+func sanitize(s string) string {
+	ret := ""
+	for _, r := range s {
+		if unicode.IsPrint(r) {
+			ret = ret + string(r)
+		}
+	}
+	return ret
 }
 
 func (session *Session) UpdatePeerInfo() {
@@ -256,8 +275,8 @@ func (session *Session) getBlocksFromBundle() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if len(session.blockQueue) < session.blockQueueMax {
-		space := session.blockQueueMax - len(session.blockQueue)
+	if len(session.BlockQueue) < session.BlockQueueMax {
+		space := session.BlockQueueMax - len(session.BlockQueue)
 		blocksToRequest := session.bundle.NextNBlocks(space)
 		requestsToAdd := make([]*blockRequest, 0)
 		for _, block := range blocksToRequest {
@@ -268,7 +287,7 @@ func (session *Session) getBlocksFromBundle() {
 			}
 			requestsToAdd = append(requestsToAdd, newReq)
 		}
-		session.blockQueue = append(session.blockQueue, requestsToAdd...)
+		session.BlockQueue = append(session.BlockQueue, requestsToAdd...)
 	}
 }
 
@@ -332,9 +351,9 @@ func (session *Session) checkResponses() {
 				}
 				i := 0
 				req := &blockRequest{Info: bi, Sent: false}
-				for i < len(session.blockQueue) {
-					if session.blockQueue[i].Equal(req) {
-						session.blockQueue = append(session.blockQueue[:i], session.blockQueue[i+1:]...)
+				for i < len(session.BlockQueue) {
+					if session.BlockQueue[i].Equal(req) {
+						session.BlockQueue = append(session.BlockQueue[:i], session.BlockQueue[i+1:]...)
 						break
 					}
 					i++
@@ -363,11 +382,11 @@ func (session *Session) checkCancelled() {
 			}
 			for _, req := range cancelled {
 				i := 0
-				for i < len(session.blockQueue) {
-					if req.Info.PieceIndex == session.blockQueue[i].Info.PieceIndex &&
-						req.Info.BeginOffset == session.blockQueue[i].Info.BeginOffset &&
-						req.Info.Length == session.blockQueue[i].Info.Length {
-						session.blockQueue[i].Rejected = append(session.blockQueue[i].Rejected, curPeer.RemotePeerID)
+				for i < len(session.BlockQueue) {
+					if req.Info.PieceIndex == session.BlockQueue[i].Info.PieceIndex &&
+						req.Info.BeginOffset == session.BlockQueue[i].Info.BeginOffset &&
+						req.Info.Length == session.BlockQueue[i].Info.Length {
+						session.BlockQueue[i].Rejected = append(session.BlockQueue[i].Rejected, curPeer.RemotePeerID)
 						break
 					}
 					i++
@@ -396,6 +415,9 @@ func (session *Session) assignParts() {
 				continue
 			}
 			numCanAdd := curPeer.NumRequestsCanAdd()
+			if numCanAdd == curPeer.RequestsOutMax {
+				curPeer.SetMaxRequests(curPeer.RequestsOutMax * 2)
+			}
 			if session.maxDownloadRateKB != 0 {
 				if numCanAdd > int(numBlocksCanQueue) {
 					numCanAdd = int(numBlocksCanQueue)
@@ -404,8 +426,8 @@ func (session *Session) assignParts() {
 			if numCanAdd > 0 {
 				numAdded := 0
 				curRequestIndex := 0
-				for numAdded < numCanAdd && curRequestIndex < len(session.blockQueue) {
-					curBlockReq := session.blockQueue[curRequestIndex]
+				for numAdded < numCanAdd && curRequestIndex < len(session.BlockQueue) {
+					curBlockReq := session.BlockQueue[curRequestIndex]
 					rejected := false
 					for _, rej := range curBlockReq.Rejected {
 						if rej == curPeer.RemotePeerID {
@@ -418,16 +440,15 @@ func (session *Session) assignParts() {
 						curPeer.HasPiece(curBlockReq.Info.PieceIndex) {
 						session.numBlocksSent++
 						curPeer.QueueRequestOut(curBlockReq.Info)
-						session.blockQueue[curRequestIndex].Sent = true
+						session.BlockQueue[curRequestIndex].Sent = true
+						session.BlockQueue[curRequestIndex].SentToID = curPeer.RemotePeerID
 						added = true
 						numAdded++
 					}
+					if rejected && peerIndex == len(session.Peers) {
+						session.BlockQueue[curRequestIndex].Rejected = make([]string, 0)
+					}
 					curRequestIndex++
-				}
-			}
-			if peerIndex == len(session.Peers) && session.numBlocksSent != len(session.blockQueue) {
-				for _, curPeerInc := range session.Peers { // if not all blocks are being requested then double all block queues
-					curPeerInc.SetMaxRequests(curPeerInc.RequestsOutMax * 2)
 				}
 			}
 		}
@@ -442,10 +463,10 @@ func (session *Session) fetchBlockInfos() {
 	defer session.mux.Unlock()
 
 	if !session.bundle.Complete {
-		blocksNeeded := session.blockQueueMax - len(session.blockQueue)
+		blocksNeeded := session.BlockQueueMax - len(session.BlockQueue)
 		addedBlocks := session.bundle.NextNBlocks(blocksNeeded)
 		for _, bi := range addedBlocks {
-			session.blockQueue = append(session.blockQueue, &blockRequest{Info: *bi, Sent: false})
+			session.BlockQueue = append(session.BlockQueue, &blockRequest{Info: *bi, Sent: false})
 		}
 	}
 }
@@ -535,6 +556,15 @@ func (session *Session) disconnectPeer(peerID string) error {
 		return errors.New("ID not in peers list")
 	}
 	peer.Close()
+	i := 0
+	for i < len(session.BlockQueue) {
+		if session.BlockQueue[i].Sent && session.BlockQueue[i].SentToID == peerID {
+			session.bundle.CancelBlock(&session.BlockQueue[i].Info)
+			session.BlockQueue = append(session.BlockQueue[:i], session.BlockQueue[i+1:]...)
+		} else {
+			i++
+		}
+	}
 	session.Peers = append(session.Peers[:peerIndex], session.Peers[peerIndex+1:]...)
 	return nil
 }
@@ -544,7 +574,7 @@ func (session *Session) sortPeers() {
 	defer session.mux.Unlock()
 
 	sort.Slice(session.Peers, func(i, j int) bool {
-		return session.Peers[i].DownloadRateKB < session.Peers[j].DownloadRateKB
+		return session.Peers[i].TotalBytesDownloaded > session.Peers[j].TotalBytesDownloaded
 	})
 }
 

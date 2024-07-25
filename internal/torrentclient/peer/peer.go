@@ -364,7 +364,7 @@ func (peer *Peer) Have(pieceIndex int64) error {
 }
 
 func (peer *Peer) runOutgoing() {
-	const BLOCK_REQUEST_TIMEOUT_MS = 5000
+	const BLOCK_REQUEST_TIMEOUT_MS = 2000
 	var err error
 	for peer.Connected {
 		peer.UpdateRates()
@@ -392,6 +392,7 @@ func (peer *Peer) runOutgoing() {
 				peer.sendInterested()
 			} else {
 				if !peer.RemoteChoking {
+					peer.mux.Lock()
 					for i := range peer.requestOutQueue {
 						if !peer.requestOutQueue[i].Sent {
 							err = peer.sendRequest(peer.requestOutQueue[i])
@@ -402,6 +403,7 @@ func (peer *Peer) runOutgoing() {
 							peer.requestOutQueue[i].ReqTime = time.Now()
 						}
 					}
+					peer.mux.Unlock()
 				}
 			}
 		}
@@ -770,8 +772,8 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
 		fmt.Printf("%x\n", msgLenBytes)
-		panic("message length exceeds max")
-		// return nil, errors.New("message length exceeds max of 17kb")
+		// panic("message length exceeds max")
+		return nil, errors.New("message length exceeds max of 17kb")
 	}
 	if debugopts.PEER_DEBUG {
 		fmt.Printf("Message Length read: %d (0x%x)\n", msgLen, msgLenBytes)

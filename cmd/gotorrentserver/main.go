@@ -102,7 +102,7 @@ func TestSession(tfPath string, myPeerID string) {
 	}
 	defer sesh.Stop()
 	start := time.Now()
-	for start.Add(time.Second*30).After(time.Now()) && !bdl.Complete {
+	for start.Add(time.Second*60).After(time.Now()) && !bdl.Complete {
 		time.Sleep(time.Second)
 	}
 	for _, req := range sesh.BlockQueue {

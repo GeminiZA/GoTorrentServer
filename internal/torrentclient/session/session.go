@@ -44,7 +44,6 @@ type Session struct {
 
 	BlockQueue    []*blockRequest
 	BlockQueueMax int
-	numBlocksSent int
 
 	running bool
 	mux     sync.Mutex
@@ -358,7 +357,6 @@ func (session *Session) checkResponses() {
 					}
 					i++
 				}
-				session.numBlocksSent--
 				responses = responses[1:]
 			}
 		}
@@ -387,6 +385,8 @@ func (session *Session) checkCancelled() {
 						req.Info.BeginOffset == session.BlockQueue[i].Info.BeginOffset &&
 						req.Info.Length == session.BlockQueue[i].Info.Length {
 						session.BlockQueue[i].Rejected = append(session.BlockQueue[i].Rejected, curPeer.RemotePeerID)
+						session.BlockQueue[i].Sent = false
+						session.BlockQueue[i].SentToID = ""
 						break
 					}
 					i++
@@ -411,11 +411,11 @@ func (session *Session) assignParts() {
 		added := false
 		// Assign requests to peers
 		for peerIndex, curPeer := range session.Peers {
-			if curPeer.RemoteChoking || curPeer.NumRequestsCanAdd() == 0 {
+			numCanAdd := curPeer.NumRequestsCanAdd()
+			if curPeer.RemoteChoking || numCanAdd == 0 {
 				continue
 			}
-			numCanAdd := curPeer.NumRequestsCanAdd()
-			if numCanAdd == curPeer.RequestsOutMax {
+			if numCanAdd > (curPeer.RequestsOutMax/2) && curPeer.RequestsOutMax < 256 {
 				curPeer.SetMaxRequests(curPeer.RequestsOutMax * 2)
 			}
 			if session.maxDownloadRateKB != 0 {
@@ -428,6 +428,10 @@ func (session *Session) assignParts() {
 				curRequestIndex := 0
 				for numAdded < numCanAdd && curRequestIndex < len(session.BlockQueue) {
 					curBlockReq := session.BlockQueue[curRequestIndex]
+					if curBlockReq.Sent {
+						curRequestIndex++
+						continue
+					}
 					rejected := false
 					for _, rej := range curBlockReq.Rejected {
 						if rej == curPeer.RemotePeerID {
@@ -435,10 +439,7 @@ func (session *Session) assignParts() {
 							break
 						}
 					}
-					if !curBlockReq.Sent &&
-						!rejected &&
-						curPeer.HasPiece(curBlockReq.Info.PieceIndex) {
-						session.numBlocksSent++
+					if !rejected && curPeer.HasPiece(curBlockReq.Info.PieceIndex) {
 						curPeer.QueueRequestOut(curBlockReq.Info)
 						session.BlockQueue[curRequestIndex].Sent = true
 						session.BlockQueue[curRequestIndex].SentToID = curPeer.RemotePeerID
@@ -556,13 +557,10 @@ func (session *Session) disconnectPeer(peerID string) error {
 		return errors.New("ID not in peers list")
 	}
 	peer.Close()
-	i := 0
-	for i < len(session.BlockQueue) {
+	for i := range session.BlockQueue {
 		if session.BlockQueue[i].Sent && session.BlockQueue[i].SentToID == peerID {
-			session.bundle.CancelBlock(&session.BlockQueue[i].Info)
-			session.BlockQueue = append(session.BlockQueue[:i], session.BlockQueue[i+1:]...)
-		} else {
-			i++
+			session.BlockQueue[i].Sent = false
+			session.BlockQueue[i].SentToID = ""
 		}
 	}
 	session.Peers = append(session.Peers[:peerIndex], session.Peers[peerIndex+1:]...)

@@ -110,10 +110,19 @@ func (session *Session) Stop() {
 	defer session.mux.Unlock()
 
 	session.running = false
-	session.trackerList.Stop()
+
+	for _, req := range session.BlockQueue {
+		session.bundle.CancelBlock(&req.Info)
+	}
+	session.BlockQueue = make([]*blockRequest, 0)
 	for _, curPeer := range session.Peers {
 		go curPeer.Close()
 	}
+	session.Peers = make([]*peer.Peer, 0)
+	session.ConnectedPeers = make([]*tracker.PeerInfo, 0)
+	session.ConnectingPeers = make([]*tracker.PeerInfo, 0)
+	session.UnconnectedPeers = make([]*tracker.PeerInfo, 0)
+	session.trackerList.Stop()
 }
 
 func (session *Session) SetMaxDownloadRate(rateKB float64) {

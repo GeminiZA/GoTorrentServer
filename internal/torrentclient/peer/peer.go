@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -158,6 +159,12 @@ func Connect(
 		return nil, err
 	}
 
+	if !peer.bitField.Empty {
+		err = peer.sendBitField()
+		if err != nil {
+			fmt.Printf("Error sending bitfield to peer: %v\n", err)
+		}
+	}
 	peer.Keepalive = true
 	peer.Connected = true
 	peer.TimeConnected = time.Now()
@@ -170,8 +177,29 @@ func Connect(
 }
 
 func (peer *Peer) Close() {
+	peer.mux.Lock()
+	defer peer.mux.Unlock()
+
 	peer.Keepalive = false
 	peer.Connected = false
+	peer.requestInQueue = make([]*blockRequest, 0)
+	peer.pendingRequestInQueue = make([]*blockRequest, 0)
+	peer.requestOutQueue = make([]*blockRequest, 0)
+	peer.responseInQueue = make([]*blockResponse, 0)
+	peer.responseOutQueue = make([]*blockResponse, 0)
+	peer.requestCancelledQueue = make([]*blockRequest, 0)
+	if !peer.AmChoking {
+		err := peer.sendChoke()
+		if err != nil {
+			fmt.Printf("Error sending choke to peer: %v", err)
+		}
+	}
+	if peer.AmInterested {
+		err := peer.sendNotInterested()
+		if err != nil {
+			fmt.Printf("Error sending not interested to peer: %v", err)
+		}
+	}
 	peer.conn.Close()
 }
 
@@ -448,8 +476,9 @@ func (peer *Peer) runOutgoing() {
 				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
 				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
 				continue
+			} else {
+				i++
 			}
-			i++
 		}
 
 		if debugopts.PEER_DEBUG {
@@ -774,6 +803,9 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 		buf := make([]byte, 4-bytesRead)
 		n, err := peer.conn.Read(buf)
 		if err != nil {
+			if strings.Contains(err.Error(), "use of closed network connection") && !peer.Connected {
+				return nil, nil
+			}
 			return nil, err
 		}
 		copy(msgLenBytes[bytesRead:], buf[:n])
@@ -798,6 +830,9 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 		buf := make([]byte, (msgLen - bytesRead))
 		n, err := peer.conn.Read(buf)
 		if err != nil {
+			if strings.Contains(err.Error(), "use of closed network connection") && !peer.Connected {
+				return nil, nil
+			}
 			return nil, err
 		}
 		copy(msgBytes[bytesRead:], buf[:n])

@@ -186,7 +186,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 			return err
 		}
 	}
-	if bundle.Bitfield.Complete() {
+	if bundle.Bitfield.Complete {
 		fmt.Println("Bundle download complete!!!!!")
 		bundle.Complete = true
 	}
@@ -347,7 +347,7 @@ func (bundle *Bundle) PrintStatus() {
 }
 
 func (bundle *Bundle) Recheck() {
-	bundle.Bitfield.Reset()
+	bundle.Bitfield.ResetAll()
 	for pieceIndex := int64(0); pieceIndex < int64(len(bundle.Pieces)); pieceIndex++ {
 		pieceBytes, err := bundle.readPiece(pieceIndex)
 		if err != nil {

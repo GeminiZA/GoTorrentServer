@@ -7,15 +7,15 @@ import (
 )
 
 type Bitfield struct {
-	Bytes  []byte
-	len    int64
-	Full   bool
-	NumSet int64
+	Bytes    []byte
+	len      int64
+	Complete bool
+	Empty    bool
+	NumSet   int64
 }
 
 func FromBytes(bytes []byte, len int64) *Bitfield {
 	bf := Bitfield{Bytes: bytes, len: len}
-	bf.Full = bf.Complete()
 	for _, b := range bytes { // Count on bits
 		if b == 0xFF {
 			bf.NumSet += 8
@@ -27,6 +27,8 @@ func FromBytes(bytes []byte, len int64) *Bitfield {
 			}
 		}
 	}
+	bf.Empty = bf.NumSet == 0
+	bf.Complete = bf.NumSet == bf.len
 	return &bf
 }
 
@@ -56,7 +58,7 @@ func FromHex(bfHex string, Length int64) (*Bitfield, error) {
 
 func New(len int64) *Bitfield {
 	byteLen := (len + 7) / 8
-	bf := Bitfield{Bytes: []byte{}, len: len, Full: false}
+	bf := Bitfield{Bytes: []byte{}, len: len, Complete: false, Empty: true}
 	for i := int64(0); i < byteLen; i++ {
 		bf.Bytes = append(bf.Bytes, 0)
 	}
@@ -93,6 +95,7 @@ func (bf *Bitfield) SetBit(index int64) error {
 	bitIndex := index % 8
 	bf.Bytes[byteIndex] = bf.Bytes[byteIndex] | (1 << (7 - bitIndex))
 	bf.NumSet++
+	bf.Complete = bf.NumSet == bf.len
 	fmt.Printf("Set bit: %d\n", index)
 	return nil
 }
@@ -103,28 +106,25 @@ func (bf *Bitfield) GetBit(index int64) bool {
 	return (1 & (bf.Bytes[byteIndex] >> (7 - bitIndex))) == 1
 }
 
-func (bf *Bitfield) Reset() {
+func (bf *Bitfield) ResetBit(index int64) error {
+	if index > bf.len {
+		return errors.New("out of bounds")
+	}
+	byteIndex := index / 8
+	bitIndex := index % 8
+	if bf.Bytes[byteIndex]>>(7-bitIndex) == 1 {
+		bf.NumSet--
+		bf.Bytes[byteIndex] = bf.Bytes[byteIndex] & ^(1 << (7 - bitIndex))
+		bf.Complete = bf.NumSet == bf.len
+		bf.Empty = bf.NumSet == 0
+	}
+	return nil
+}
+
+func (bf *Bitfield) ResetAll() {
 	for i := range bf.Bytes {
 		bf.Bytes[i] = 0
 	}
-}
-
-func (bf *Bitfield) Complete() bool {
-	for i, b := range bf.Bytes {
-		if b != 0xFF {
-			if i == len(bf.Bytes)-1 {
-				bitsToCheck := int(bf.len % 8)
-				for j := 0; j < bitsToCheck; j++ {
-					if (bf.Bytes[i] >> (7 - j) & 1) != 1 {
-						return false
-					}
-				}
-			} else {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (bfA *Bitfield) And(bfB *Bitfield) *Bitfield {

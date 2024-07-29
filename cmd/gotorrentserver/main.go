@@ -100,11 +100,19 @@ func TestSession(tfPath string, myPeerID string) {
 	if err != nil {
 		panic(err)
 	}
-	defer sesh.Stop()
 	start := time.Now()
+	for start.Add(time.Second*5).After(time.Now()) && !bdl.Complete {
+		time.Sleep(time.Second)
+	}
+	sesh.Stop()
+	time.Sleep(time.Second * 5)
+	sesh.Start()
+
+	start = time.Now()
 	for start.Add(time.Second*60).After(time.Now()) && !bdl.Complete {
 		time.Sleep(time.Second)
 	}
+
 	for _, req := range sesh.BlockQueue {
 		fmt.Printf("Req: (%d, %d) rej: %v; Sent: %t; ID: %s\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Rejected, req.Sent, req.SentToID)
 	}

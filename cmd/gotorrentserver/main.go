@@ -30,6 +30,7 @@ func main() {
 				if len(os.Args) < 5 {
 					panic("in peer test no torrent file specified")
 				}
+				fmt.Printf("Testing peer with file: %s\n", os.Args[4])
 				TestPeer(os.Args[4], myPeerID)
 			} else if testPkg == "session" {
 				if len(os.Args) < 5 {
@@ -111,6 +112,7 @@ func TestSession(tfPath string, myPeerID string) {
 }
 
 func TestPeer(tfPath string, myPeerID string) {
+	fmt.Println("Starting peer test...")
 	// Connect to a peer
 	tf, err := torrentfile.ParseFile(tfPath)
 	if err != nil {

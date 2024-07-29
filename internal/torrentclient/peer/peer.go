@@ -435,9 +435,16 @@ func (peer *Peer) runOutgoing() {
 		}
 
 		// Handle timed pieces
+
+		if debugopts.PEER_DEBUG {
+			fmt.Println("Handling timed blocks:")
+		}
 		i := 0
 		for i < len(peer.requestOutQueue) {
 			if peer.requestOutQueue[i].Sent && time.Now().After(peer.requestOutQueue[i].ReqTime.Add(BLOCK_REQUEST_TIMEOUT_MS*time.Millisecond)) {
+				if debugopts.PEER_DEBUG {
+					fmt.Printf("Block: (%d, %d, %d) timed\n", peer.requestOutQueue[i].Info.PieceIndex, peer.requestOutQueue[i].Info.BeginOffset, peer.requestOutQueue[i].Info.Length)
+				}
 				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
 				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
 				continue
@@ -761,13 +768,16 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	const MESSAGE_READ_TIMEOUT_MS = 2000
 	const MAX_MESSAGE_LENGTH = 17 * 1024 // 17kb for 16 kb max piece length
 	// peer.conn.SetReadDeadline(time.Time{})
+	bytesRead := 0
 	msgLenBytes := make([]byte, 4)
-	n, err := peer.conn.Read(msgLenBytes)
-	if err != nil {
-		return nil, err
-	}
-	if n != 4 {
-		return nil, fmt.Errorf("malformed message length read(length %d): 0x%x", n, msgLenBytes)
+	for bytesRead < 4 {
+		buf := make([]byte, 4-bytesRead)
+		n, err := peer.conn.Read(buf)
+		if err != nil {
+			return nil, err
+		}
+		copy(msgLenBytes[bytesRead:], buf[:n])
+		bytesRead += n
 	}
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
@@ -782,18 +792,17 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 		return message.NewKeepAlive(), nil
 	}
 	// peer.conn.SetReadDeadline(time.Now().Add(MESSAGE_READ_TIMEOUT_MS * time.Millisecond))
-	msgBytes := make([]byte, 0)
-	bytesRead := 0
-	for len(msgBytes) < msgLen {
+	msgBytes := make([]byte, msgLen)
+	bytesRead = 0
+	for bytesRead < msgLen {
 		buf := make([]byte, (msgLen - bytesRead))
-		n, err = peer.conn.Read(buf)
+		n, err := peer.conn.Read(buf)
 		if err != nil {
 			return nil, err
 		}
+		copy(msgBytes[bytesRead:], buf[:n])
 		bytesRead += n
-		msgBytes = append(msgBytes, buf[0:n]...)
 	}
-	// fmt.Printf("Message bytes read: \n %x\n", msgBytes)
 	msg, err := message.ParseMessage(msgBytes)
 	if err != nil {
 		return nil, err

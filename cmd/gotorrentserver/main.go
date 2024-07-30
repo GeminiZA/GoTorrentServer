@@ -80,17 +80,8 @@ func TestSession(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	fmt.Println("Torrentfile succesfully parsed")
-	bdl, err := bundle.NewBundle(tf, "./TestBundle", 20)
-	if err != nil {
-		panic(err)
-	}
-	dbc, err := database.Connect()
-	if err != nil {
-		panic(err)
-	}
-	defer dbc.Disconnect()
 	listenPort := uint16(6681)
-	sesh, err := session.New(bdl, dbc, tf, listenPort, myPeerID)
+	sesh, err := session.New("./TestBundle", tf, listenPort, myPeerID)
 	if err != nil {
 		panic(err)
 	}
@@ -101,22 +92,10 @@ func TestSession(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	start := time.Now()
-	for start.Add(time.Second*5).After(time.Now()) && !bdl.Complete {
+	for start.Add(time.Second*60).After(time.Now()) && !sesh.Bundle.Complete {
 		time.Sleep(time.Second)
 	}
-	sesh.Stop()
-	time.Sleep(time.Second * 5)
-	sesh.Start()
-
-	start = time.Now()
-	for start.Add(time.Second*60).After(time.Now()) && !bdl.Complete {
-		time.Sleep(time.Second)
-	}
-
-	for _, req := range sesh.BlockQueue {
-		fmt.Printf("Req: (%d, %d) rej: %v; Sent: %t; ID: %s\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Rejected, req.Sent, req.SentToID)
-	}
-	fmt.Printf("%v\n", sesh.BlockQueue)
+	defer sesh.Stop()
 }
 
 func TestPeer(tfPath string, myPeerID string) {

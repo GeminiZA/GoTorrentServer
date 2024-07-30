@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
@@ -18,8 +17,8 @@ import (
 )
 
 type Session struct {
-	bundle      *bundle.Bundle
-	dbc         *database.DBConn
+	Path        string
+	Bundle      *bundle.Bundle
 	trackerList *trackerlist.TrackerList
 	tf          *torrentfile.TorrentFile
 
@@ -64,12 +63,11 @@ func (bra *blockRequest) Equal(brb *blockRequest) bool {
 
 // Exported
 
-func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, listenPort uint16, peerID string) (*Session, error) {
+func New(path string, tf *torrentfile.TorrentFile, listenPort uint16, peerID string) (*Session, error) {
 	session := Session{
-		Peers:                   make([]*peer.Peer, 0),
-		bundle:                  bnd,
+		Peers:                   make([]*peer.Peer, 0, 20),
+		Path:                    path,
 		tf:                      tf,
-		dbc:                     dbc,
 		listenPort:              listenPort,
 		peerID:                  peerID,
 		maxDownloadRateKB:       0,
@@ -81,10 +79,15 @@ func New(bnd *bundle.Bundle, dbc *database.DBConn, tf *torrentfile.TorrentFile, 
 		maxPeers:                10,
 		downloadRateKB:          0,
 		uploadRateKB:            0,
-		BlockQueue:              make([]*blockRequest, 0),
+		BlockQueue:              make([]*blockRequest, 0, 50),
 		BlockQueueMax:           50,
 		running:                 false,
 	}
+	bnd, err := bundle.NewBundle(tf, path, 20)
+	if err != nil {
+		return nil, err
+	}
+	session.Bundle = bnd
 	session.trackerList = trackerlist.New(
 		tf.Announce,
 		tf.AnnounceList,
@@ -112,16 +115,16 @@ func (session *Session) Stop() {
 	session.running = false
 
 	for _, req := range session.BlockQueue {
-		session.bundle.CancelBlock(&req.Info)
+		session.Bundle.CancelBlock(&req.Info)
 	}
-	session.BlockQueue = make([]*blockRequest, 0)
+	session.BlockQueue = make([]*blockRequest, 0, session.BlockQueueMax)
 	for _, curPeer := range session.Peers {
 		go curPeer.Close()
 	}
-	session.Peers = make([]*peer.Peer, 0)
-	session.ConnectedPeers = make([]*tracker.PeerInfo, 0)
-	session.ConnectingPeers = make([]*tracker.PeerInfo, 0)
-	session.UnconnectedPeers = make([]*tracker.PeerInfo, 0)
+	session.Peers = make([]*peer.Peer, 0, 20)
+	session.ConnectedPeers = make([]*tracker.PeerInfo, 0, 20)
+	session.ConnectingPeers = make([]*tracker.PeerInfo, 0, 20)
+	session.UnconnectedPeers = make([]*tracker.PeerInfo, 0, 20)
 	session.trackerList.Stop()
 }
 
@@ -141,6 +144,18 @@ func (session *Session) SetMaxUploadRate(rateKB float64) {
 	session.maxResponsesOutRate = rateKB / float64(16)
 }
 
+func (session *Session) Recheck() error {
+	if session.running {
+		session.Stop()
+	}
+	err := session.Bundle.Recheck()
+	if err != nil {
+		return err
+	}
+	err = session.Start()
+	return err
+}
+
 // Internal
 
 func (session *Session) run() {
@@ -149,7 +164,7 @@ func (session *Session) run() {
 		fmt.Printf("Error starting trackers: %v\n", err)
 	}
 	for session.running {
-		if session.bundle.Complete { // Seeding
+		if session.Bundle.Complete { // Seeding
 			return
 			// Check for upload rate
 
@@ -200,11 +215,8 @@ func (session *Session) run() {
 
 			// Check for new peers connecting
 
-			// Update Database
-			session.dbc.UpdateBitfield(session.bundle.InfoHash, session.bundle.Bitfield)
-
 			fmt.Print("Session bitfield: ")
-			session.bundle.Bitfield.Print()
+			session.Bundle.Bitfield.Print()
 
 			// Check for new peers to connect to
 			session.UpdatePeerInfo()
@@ -285,12 +297,12 @@ func (session *Session) getBlocksFromBundle() {
 
 	if len(session.BlockQueue) < session.BlockQueueMax {
 		space := session.BlockQueueMax - len(session.BlockQueue)
-		blocksToRequest := session.bundle.NextNBlocks(space)
-		requestsToAdd := make([]*blockRequest, 0)
+		blocksToRequest := session.Bundle.NextNBlocks(space)
+		requestsToAdd := make([]*blockRequest, 0, 50)
 		for _, block := range blocksToRequest {
 			newReq := &blockRequest{
 				Info:     *block,
-				Rejected: make([]string, 0),
+				Rejected: make([]string, 0, 20),
 				Sent:     false,
 			}
 			requestsToAdd = append(requestsToAdd, newReq)
@@ -320,7 +332,7 @@ func (session *Session) checkRequests() {
 				if curPeer.NumResponsesOut() == curPeer.ResponsesOutMax {
 					break
 				}
-				nextResponse, err := session.bundle.GetBlock(&req.Info)
+				nextResponse, err := session.Bundle.GetBlock(&req.Info)
 				if err != nil {
 					fmt.Printf("err loading block: (%d, %d, %d) for response: %v\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, err)
 					continue
@@ -347,7 +359,7 @@ func (session *Session) checkResponses() {
 		if curPeer.NumResponsesIn() > 0 {
 			responses := curPeer.GetResponsesIn()
 			for len(responses) > 0 {
-				err := session.bundle.WriteBlock(
+				err := session.Bundle.WriteBlock(
 					int64(responses[0].PieceIndex),
 					int64(responses[0].BeginOffset),
 					responses[0].Block,
@@ -355,7 +367,7 @@ func (session *Session) checkResponses() {
 				bi := bundle.BlockInfo{PieceIndex: int64(responses[0].PieceIndex), BeginOffset: int64(responses[0].BeginOffset), Length: int64(len(responses[0].Block))}
 				if err != nil {
 					fmt.Printf("error writing response (%d, %d) from peer(%s): %v\n", responses[0].PieceIndex, responses[0].BeginOffset, curPeer.RemotePeerID, err)
-					session.bundle.CancelBlock(&bi)
+					session.Bundle.CancelBlock(&bi)
 				}
 				i := 0
 				req := &blockRequest{Info: bi, Sent: false}
@@ -456,7 +468,7 @@ func (session *Session) assignParts() {
 						numAdded++
 					}
 					if rejected && peerIndex == len(session.Peers) {
-						session.BlockQueue[curRequestIndex].Rejected = make([]string, 0)
+						session.BlockQueue[curRequestIndex].Rejected = make([]string, 0, 20)
 					}
 					curRequestIndex++
 				}
@@ -472,9 +484,9 @@ func (session *Session) fetchBlockInfos() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if !session.bundle.Complete {
+	if !session.Bundle.Complete {
 		blocksNeeded := session.BlockQueueMax - len(session.BlockQueue)
-		addedBlocks := session.bundle.NextNBlocks(blocksNeeded)
+		addedBlocks := session.Bundle.NextNBlocks(blocksNeeded)
 		for _, bi := range addedBlocks {
 			session.BlockQueue = append(session.BlockQueue, &blockRequest{Info: *bi, Sent: false})
 		}
@@ -538,10 +550,10 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 		"",
 		pi.IP,
 		pi.Port,
-		session.bundle.InfoHash,
+		session.Bundle.InfoHash,
 		session.peerID,
-		session.bundle.Bitfield,
-		session.bundle.NumPieces,
+		session.Bundle.Bitfield,
+		session.Bundle.NumPieces,
 	)
 	if err != nil {
 		return err

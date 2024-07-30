@@ -58,8 +58,8 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		for _, file := range metaData.Info.Files {
 			path := ""
 			if len(bundle.Path) > 0 {
-				path = fmt.Sprintf("./%s/%s", bundle.Path, metaData.Info.Name)
-				err := os.MkdirAll(path, 0777)
+				path = fmt.Sprintf("%s/%s", bundle.Path, metaData.Info.Name)
+				err := os.MkdirAll(path, 0755)
 				if err != nil {
 					return nil, err
 				}
@@ -72,7 +72,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 			for index, pathPiece := range file.Path {
 				curBundleFile.Path += fmt.Sprintf("/%s", pathPiece)
 				if index != len(file.Path)-1 {
-					err := os.MkdirAll(curBundleFile.Path, 0777)
+					err := os.MkdirAll(curBundleFile.Path, 0755)
 					if err != nil {
 						return nil, err
 					}
@@ -125,12 +125,13 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	// Write files
 
+	filesExist := false
 	for _, bundleFile := range bundle.Files {
-		if debugopts.BUNDLE_DEBUG {
-			fmt.Printf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length)
-		}
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
-			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0644)
+			if debugopts.BUNDLE_DEBUG {
+				fmt.Printf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length)
+			}
+			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0755)
 			if err != nil {
 				return nil, err
 			}
@@ -142,7 +143,13 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 					return nil, err
 				}
 			}
+		} else {
+			filesExist = true
 		}
+	}
+	if filesExist {
+		err := bundle.Recheck()
+		fmt.Printf("Error rechecking: %v\n", err)
 	}
 
 	return &bundle, nil
@@ -153,7 +160,13 @@ func checkFile(path string, length int64) bool {
 	if err != nil {
 		return false
 	}
-	return info.Size() == length
+	if debugopts.BUNDLE_DEBUG {
+		fmt.Printf("File info: (%s): length: %d / %d\n", path, info.Size(), length)
+	}
+	if info.Size() != length {
+		return false
+	}
+	return true
 }
 
 func (bundle *Bundle) DeleteFiles() error {
@@ -202,13 +215,13 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only c
 	piece := bundle.Pieces[pieceIndex]
 	bytes := piece.GetBytes()
 	if !bundle.MultiFile {
-		file, err := os.OpenFile(bundle.Name, os.O_WRONLY, 0644)
+		file, err := os.OpenFile(bundle.Name, os.O_WRONLY, 0755)
 		if err != nil {
 			return err
 		}
 		_, err = file.WriteAt(bytes, piece.ByteOffset)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	} else { // Else multifile
 		pieceByteWriteStartOffset := int64(0)
@@ -222,7 +235,7 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only c
 				pieceByteWriteEndOffset = bundleFile.ByteStart + bundleFile.Length - piece.ByteOffset // set pieceByteWriteEndOffset to the last byte in the file
 			}
 			bytesToWrite := bytes[pieceByteWriteStartOffset:pieceByteWriteEndOffset] // Reslice to correct bytes to write
-			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0644)
+			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0755)
 			if err != nil {
 				return err
 			}
@@ -251,34 +264,50 @@ func (bundle *Bundle) loadPiece(pieceIndex int64) error {
 }
 
 func (bundle *Bundle) readPiece(pieceIndex int64) ([]byte, error) {
-	pieceBytes := []byte{}
-	bytesLeft := bundle.Pieces[pieceIndex].length
-	byteOffset := bundle.Pieces[pieceIndex].ByteOffset
-	for _, bundleFile := range bundle.Files {
-		if bundleFile.ByteStart <= byteOffset && bundleFile.ByteStart+bundleFile.Length <= byteOffset {
-			fileByteOffset := byteOffset - bundleFile.ByteStart
-			readLen := bytesLeft
-			if fileByteOffset+bytesLeft > bundleFile.Length {
-				readLen = bytesLeft - (bundleFile.Length - fileByteOffset)
+	piece := bundle.Pieces[pieceIndex]
+	pieceBytes := make([]byte, 0, piece.length)
+
+	if !bundle.MultiFile {
+		file, err := os.OpenFile(bundle.Name, os.O_RDONLY, 0755)
+		if err != nil {
+			return nil, err
+		}
+		_, err = file.ReadAt(pieceBytes, piece.ByteOffset)
+		if err != nil {
+			return nil, err
+		}
+	} else { // Else multifile
+		pieceByteReadStartOffset := int64(0)
+		for _, bundleFile := range bundle.Files {
+			if bundleFile.ByteStart > pieceByteReadStartOffset+piece.ByteOffset ||
+				bundleFile.ByteStart+bundleFile.Length < pieceByteReadStartOffset+piece.ByteOffset { // if bytes to write do not start in this file
+				continue
 			}
-			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0644)
+			pieceByteReadEndOffset := piece.length
+			if pieceByteReadEndOffset+piece.ByteOffset > bundleFile.ByteStart+bundleFile.Length { // if the piece ends after the end of the file
+				pieceByteReadEndOffset = bundleFile.ByteStart + bundleFile.Length - piece.ByteOffset // set pieceByteReadEndOffset to the last byte in the file
+			}
+			lenToRead := pieceByteReadEndOffset - pieceByteReadStartOffset
+			bytesRead := make([]byte, lenToRead)
+			file, err := os.OpenFile(bundleFile.Path, os.O_RDONLY, 0755)
 			if err != nil {
 				return nil, err
 			}
-			defer file.Close()
-			buf := make([]byte, readLen)
-			_, err = file.ReadAt(buf, fileByteOffset)
+			fileReadOffset := pieceByteReadStartOffset + piece.ByteOffset - bundleFile.ByteStart
+			_, err = file.ReadAt(bytesRead, fileReadOffset)
 			if err != nil {
 				return nil, err
 			}
-			pieceBytes = append(pieceBytes, buf...)
-			bytesLeft -= readLen
-			byteOffset += readLen
-			if bytesLeft == 0 {
+			pieceBytes = append(pieceBytes, bytesRead...)
+
+			// readPiece
+			if pieceByteReadEndOffset == piece.ByteOffset+piece.length { // if last byte in the piece is written
 				break
 			}
-		}
+			pieceByteReadStartOffset = pieceByteReadEndOffset // start next write at current end
+		} // end iterating through files
 	}
+
 	return pieceBytes, nil
 }
 
@@ -346,25 +375,33 @@ func (bundle *Bundle) PrintStatus() {
 	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
 }
 
-func (bundle *Bundle) Recheck() {
+func (bundle *Bundle) Recheck() error {
+	if debugopts.BUNDLE_DEBUG {
+		fmt.Println("Rechecking bundle...")
+	}
 	bundle.Bitfield.ResetAll()
 	for pieceIndex := int64(0); pieceIndex < int64(len(bundle.Pieces)); pieceIndex++ {
 		pieceBytes, err := bundle.readPiece(pieceIndex)
 		if err != nil {
-			fmt.Println(err)
-			return
+			fmt.Printf("Error reading piece: %v\n", err)
+			return err
 		}
+		// fmt.Printf("Read bytes for piece(%d): %x\n", pieceIndex, pieceBytes)
 		hasher := sha1.New()
 		_, err = hasher.Write(pieceBytes)
 		if err != nil {
-			fmt.Println(err)
-			return
+			return err
 		}
 		pieceHash := hasher.Sum(nil)
+		// fmt.Printf("Rechecking Piece(%d): Hash: %x, CheckedHash: %x\n", pieceIndex, bundle.Pieces[pieceIndex].hash, pieceHash)
 		if bytes.Equal(pieceHash, bundle.Pieces[pieceIndex].hash) {
 			bundle.Bitfield.SetBit(pieceIndex)
 		}
 	}
-	fmt.Printf("Recheck complete bitfield: ")
-	bundle.Bitfield.Print()
+	if debugopts.BUNDLE_DEBUG {
+		fmt.Printf("Recheck complete bitfield: ")
+		bundle.Bitfield.Print()
+	}
+	bundle.Complete = bundle.Bitfield.Complete
+	return nil
 }

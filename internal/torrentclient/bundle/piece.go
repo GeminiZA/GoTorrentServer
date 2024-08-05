@@ -5,9 +5,6 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"errors"
-	"fmt"
-
-	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 )
 
 type Piece struct {
@@ -59,13 +56,7 @@ func (piece *Piece) WriteBlock(beginOffset int64, bytes []byte) error {
 	if piece.Blocks[blockIndex].Length != int64(len(bytes)) {
 		return errors.New("block length incorrect")
 	}
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("Found block to write: block index: %d\n", blockIndex)
-	}
 	piece.Blocks[blockIndex].write(bytes)
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("Block Written successfully: block index: %d\n", blockIndex)
-	}
 	if piece.checkFull() {
 		correct, err := piece.checkHash()
 		if err != nil {
@@ -95,9 +86,6 @@ func (piece *Piece) checkHash() (bool, error) {
 func (piece *Piece) checkFull() bool {
 	for _, block := range piece.Blocks {
 		if !block.Written {
-			if debugopts.BUNDLE_DEBUG {
-				fmt.Println("Piece not full yet...")
-			}
 			return false
 		}
 	}
@@ -123,4 +111,3 @@ func (piece *Piece) CancelBlock(beginOffset int64) error {
 	}
 	return errors.New("offset not found in blocks (CancelBlock)")
 }
-

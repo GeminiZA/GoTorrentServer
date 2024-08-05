@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
 
@@ -20,11 +21,11 @@ type TorrentInfo struct {
 	Private     bool
 	Length      int64
 	Files       []FileInfo
-	MultiFile	bool
+	MultiFile   bool
 }
 
 type TorrentFile struct {
-	InfoHash 	 []byte
+	InfoHash     []byte
 	Announce     string
 	AnnounceList [][]string
 	CreationDate int64
@@ -32,6 +33,7 @@ type TorrentFile struct {
 	CreatedBy    string
 	Encoding     string
 	Info         TorrentInfo
+	logger       *logger.Logger
 }
 
 func (tf *TorrentFile) Bencode() (string, error) {
@@ -45,7 +47,7 @@ func (tf *TorrentFile) Bencode() (string, error) {
 	dict["created by"] = tf.CreatedBy
 	dict["encoding"] = tf.Encoding
 	infoDict := make(map[string]interface{})
-	dict["info"] = infoDict 
+	dict["info"] = infoDict
 	infoDict["name"] = tf.Info.Name
 	infoDict["piece length"] = tf.Info.PieceLength
 	piecesString := ""
@@ -67,38 +69,41 @@ func (tf *TorrentFile) Bencode() (string, error) {
 		infoDict["files"] = filesList
 	}
 	bencodedFile, err := bencode.BEncode(dict)
-	
+
 	return bencodedFile, err
 }
 
-func ParseFileString(data *[]byte) (*TorrentFile, error) {
-	var tf TorrentFile
+func New() *TorrentFile {
+	return &TorrentFile{
+		logger: logger.New("ERROR", "TorrentFile"),
+	}
+}
+
+func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 	var err error
 
 	tf.InfoHash, err = bencode.GetInfoHash(data)
-	//fmt.Printf("Got info hash: %s\n", string(tf.InfoHash))
-
+	tf.logger.Debug(fmt.Sprintf("Got info hash: %s\n", string(tf.InfoHash)))
 	if err != nil {
 		panic(err)
 	}
 
 	tokens, err := bencode.Tokenize(data)
-
 	if err != nil {
-		return nil, err
+		return err
 	}
-	//fmt.Printf("Succesfully tokenized file\n")
+	tf.logger.Debug("Succesfully tokenized file\n")
 
 	dict, err := bencode.ParseDict(tokens)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	//fmt.Printf("Successfully parsed dict\n")
-	
+	tf.logger.Debug("Successfully parsed dict\n")
+
 	var ok bool
 	tf.Announce, ok = dict["announce"].(string)
 	if !ok {
-		return nil, errors.New("no announce in file")
+		return errors.New("no announce in file")
 	}
 	rawAnnounceList, ok := dict["announce-list"].([]interface{})
 	if ok {
@@ -117,41 +122,41 @@ func ParseFileString(data *[]byte) (*TorrentFile, error) {
 	}
 	tf.CreationDate, ok = dict["creation date"].(int64)
 	if !ok {
-		return nil, errors.New("no creation date")
+		return errors.New("no creation date")
 	}
 	tf.Comment, _ = dict["comment"].(string)
 	tf.CreatedBy, ok = dict["created by"].(string)
 	if !ok {
-		return nil, errors.New("no created by")
+		return errors.New("no created by")
 	}
 	tf.Encoding, _ = dict["encoding"].(string)
 	infoDict, ok := dict["info"].(map[string]interface{})
 	if !ok {
-		return nil, errors.New("no info")
+		return errors.New("no info")
 	}
 	tf.Info.Name, ok = infoDict["name"].(string)
 	if !ok {
-		return nil, errors.New("no name")
+		return errors.New("no name")
 	}
 	tf.Info.PieceLength, ok = infoDict["piece length"].(int64)
 	if !ok {
-		return nil, errors.New("no piece length")
+		return errors.New("no piece length")
 	}
-	//pieces
+	// pieces
 	piecesString, ok := infoDict["pieces"].(string)
 	if !ok {
-		return nil, errors.New("no pieces")
+		return errors.New("no pieces")
 	}
-	if len(piecesString) % 20 != 0 {
-		return nil, errors.New("pieces length not divisible by 20")
+	if len(piecesString)%20 != 0 {
+		return errors.New("pieces length not divisible by 20")
 	}
-	fmt.Printf("Pieces string length: %d\n", len(piecesString))
+	tf.logger.Debug(fmt.Sprintf("Pieces string length: %d\n", len(piecesString)))
 	for i := 0; i < len(piecesString); i += 20 {
 		tf.Info.Pieces = append(tf.Info.Pieces, []byte(piecesString[i:i+20]))
 	}
 	privateBool, ok := infoDict["private"].(int64)
 	if !ok {
-		return nil, errors.New("no private")
+		return errors.New("no private")
 	}
 	tf.Info.Private = privateBool != 0
 	length, ok := infoDict["length"].(int64)
@@ -161,44 +166,44 @@ func ParseFileString(data *[]byte) (*TorrentFile, error) {
 	} else {
 		files, ok := infoDict["files"].([]interface{})
 		if !ok {
-			return nil, errors.New("no files or length")
+			return errors.New("no files or length")
 		}
 		tf.Info.MultiFile = true
 		for _, file := range files {
 			fileItem, ok := file.(map[string]interface{})
 			if !ok {
-				return nil, errors.New("invalid file item")
+				return errors.New("invalid file item")
 			}
 			length, ok := fileItem["length"].(int64)
 			if !ok {
-				return nil, errors.New("no length in file")
+				return errors.New("no length in file")
 			}
 			var pathList []string
 			pathListInterface, ok := fileItem["path"].([]interface{})
 			if !ok {
-				return nil, errors.New("no path in file")
+				return errors.New("no path in file")
 			}
 			for _, path := range pathListInterface {
 				pathString, ok := path.(string)
 				if !ok {
-					return nil, errors.New("invalid path list in file")
+					return errors.New("invalid path list in file")
 				}
 				pathList = append(pathList, pathString)
 			}
 			tf.Info.Files = append(tf.Info.Files, FileInfo{Path: pathList, Length: length})
 		}
 	}
-	return &tf, nil
+	return nil
 }
 
-func ParseFile(path string) (*TorrentFile, error) {
-	fmt.Printf("Parsing file with path: %s\n", path)
+func (tf *TorrentFile) ParseFile(path string) error {
+	tf.logger.Debug(fmt.Sprintf("Parsing file with path: %s\n", path))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	tf, err := ParseFileString(&data)
+	err = tf.ParseFileString(&data)
 
-	return tf, err
+	return err
 }

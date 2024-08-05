@@ -151,7 +151,6 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 		handshakeBytes = append(handshakeBytes, bytes[20:28]...)
 		handshakeBytes = append(handshakeBytes, bytes[28:48]...)
 		handshakeBytes = append(handshakeBytes, bytes[48:68]...)
-		fmt.Printf("Got handshake: \nHex: %x\n", handshakeBytes)
 	}
 	msg.Reserved = bytes[20:28]
 	msg.InfoHash = bytes[28:48]
@@ -164,7 +163,6 @@ func ParseMessage(msgBytes []byte) (*Message, error) {
 
 	msgLen := len(msgBytes)
 	if msgLen > MAX_MESSAGE_LENGTH {
-		fmt.Printf("Message too long: %d", msgLen)
 		return nil, errors.New("message exceeds max length")
 	}
 	if msgLen == 0 {
@@ -209,38 +207,40 @@ func ParseMessage(msgBytes []byte) (*Message, error) {
 	return nil, errors.New("invalid message id")
 }
 
-func (msg *Message) Print() {
+func (msg *Message) Print() string {
+	ret := ""
 	switch msg.Type {
 	case KEEP_ALIVE:
-		fmt.Println("{Type: keep alive}")
+		ret += "{Type: keep alive}"
 	case CHOKE:
-		fmt.Println("{Type: choke}")
+		ret += "{Type: choke}"
 	case UNCHOKE:
-		fmt.Println("{Type: unchoke}")
+		ret += "{Type: unchoke}"
 	case INTERESTED:
-		fmt.Println("{Type: interested}")
+		ret += "{Type: interested}"
 	case NOT_INTERESTED:
-		fmt.Println("{Type: not interested}")
+		ret += "{Type: not interested}"
 	case HAVE:
-		fmt.Printf("{Type: have, Index: %d}\n", msg.Index)
+		ret += fmt.Sprintf("{Type: have, Index: %d}\n", msg.Index)
 	case BITFIELD:
 		s := fmt.Sprintf("{Type: bitfield, length: %d, field: blob}\n", msg.Length)
 		s += "Bitfield:\n"
 		for _, b := range msg.BitField {
 			s += fmt.Sprintf("%08b ", b)
 		}
-		fmt.Println(s)
+		ret += s
 	case REQUEST:
-		fmt.Printf("{Type: request, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
+		ret += fmt.Sprintf("{Type: request, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PIECE:
-		fmt.Printf("{Type: piece, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, len(msg.Piece))
+		ret += fmt.Sprintf("{Type: piece, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, len(msg.Piece))
 	case CANCEL:
-		fmt.Printf("{Type: cancel, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
+		ret += fmt.Sprintf("{Type: cancel, index: %d, begin: %d, length: %d}\n", msg.Index, msg.Begin, msg.Length)
 	case PORT:
-		fmt.Printf("{Type: port, port: %d}\n", msg.Port)
+		ret += fmt.Sprintf("{Type: port, port: %d}\n", msg.Port)
 	case HANDSHAKE:
-		fmt.Printf("Type: handshake, peerID: %s\n", msg.PeerID)
+		ret += fmt.Sprintf("Type: handshake, peerID: %s\n", msg.PeerID)
 	}
+	return ret
 }
 
 func NewHandshake(infoHash []byte, peerID string) *Message {

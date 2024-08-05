@@ -25,7 +25,6 @@ type Token struct {
 }
 
 func Tokenize(data *[]byte) ([]Token, error) {
-	// fmt.Printf("Tokenizing file\n")
 	curContainers := []Token{}
 	tokens := []Token{}
 	i := 0
@@ -74,7 +73,7 @@ func Tokenize(data *[]byte) ([]Token, error) {
 	return tokens, nil
 }
 
-func PrintToken(token Token) {
+func PrintToken(token Token) string {
 	typeString := ""
 	switch token.Type {
 	case STRING:
@@ -92,13 +91,14 @@ func PrintToken(token Token) {
 	}
 	valString := string(token.Value)
 	if token.Type == STRING || token.Type == INTEGER {
-		fmt.Printf("{%s: %s}", typeString, valString)
+		return fmt.Sprintf("{%s: %s}", typeString, valString)
 	} else {
-		fmt.Printf("{%s}", typeString)
+		return fmt.Sprintf("{%s}", typeString)
 	}
 }
 
-func PrintTokens(tokens []Token) {
+func PrintTokens(tokens []Token) string {
+	msg := ""
 	for i := range tokens {
 		curToken := tokens[i]
 		var typeString string
@@ -117,15 +117,16 @@ func PrintTokens(tokens []Token) {
 			typeString = "END_OF_LIST"
 		}
 		if len(curToken.Value) > 0 {
-			fmt.Printf("%s (", typeString)
+			msg += fmt.Sprintf("%s (", typeString)
 			for _, val := range curToken.Value {
-				fmt.Printf("%c, ", val)
+				msg += fmt.Sprintf("%c, ", val)
 			}
-			fmt.Printf(")\n")
+			msg += ")\n"
 		} else {
-			fmt.Printf("%s\n", typeString)
+			msg += fmt.Sprintf("%s\n", typeString)
 		}
 	}
+	return msg
 }
 
 func ParseString(token Token) (string, error) {
@@ -353,7 +354,6 @@ func BEncode(dict map[string]interface{}) (string, error) {
 }
 
 func GetInfoHash(data *[]byte) ([]byte, error) {
-	// fmt.Println("Getting info hash...")
 	sData := (*data)
 	i := 0
 	searchStr := "4:infod"
@@ -397,11 +397,9 @@ func GetInfoHash(data *[]byte) ([]byte, error) {
 			i++
 		}
 	}
-	// fmt.Printf("info start: %d, info end: %d\n", dictStart, i)
 	sInfo := sData[dictStart:i]
 	hasher := sha1.New()
 	hasher.Write([]byte(sInfo))
 	infoHash := hasher.Sum(nil)
 	return infoHash, nil
 }
-

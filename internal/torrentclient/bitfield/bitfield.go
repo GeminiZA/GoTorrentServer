@@ -87,6 +87,10 @@ func (bf *Bitfield) FirstOff() int64 {
 	return -1
 }
 
+func (bf *Bitfield) Clone() *Bitfield {
+	return FromBytes(bf.Bytes, bf.len)
+}
+
 func (bf *Bitfield) SetBit(index int64) error {
 	if index > bf.len {
 		return errors.New("out of bounds")
@@ -96,7 +100,6 @@ func (bf *Bitfield) SetBit(index int64) error {
 	bf.Bytes[byteIndex] = bf.Bytes[byteIndex] | (1 << (7 - bitIndex))
 	bf.NumSet++
 	bf.Complete = bf.NumSet == bf.len
-	fmt.Printf("Set bit: %d\n", index)
 	return nil
 }
 
@@ -167,10 +170,11 @@ func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
 	return true
 }
 
-func (bf *Bitfield) Print() {
-	fmt.Printf("Bitfield (%d): ", bf.len)
+func (bf *Bitfield) Print() string {
+	msg := fmt.Sprintf("Bitfield (%d): ", bf.len)
 	for _, b := range bf.Bytes {
-		fmt.Printf("%08b ", b)
+		msg += fmt.Sprintf("%08b ", b)
 	}
-	fmt.Println()
+	msg += "\n"
+	return msg
 }

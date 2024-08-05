@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
@@ -46,6 +46,8 @@ type Session struct {
 
 	running bool
 	mux     sync.Mutex
+
+	logger *logger.Logger
 }
 
 type blockRequest struct {
@@ -82,6 +84,8 @@ func New(path string, tf *torrentfile.TorrentFile, listenPort uint16, peerID str
 		BlockQueue:              make([]*blockRequest, 0, 50),
 		BlockQueueMax:           50,
 		running:                 false,
+
+		logger: logger.New("DEBUG", "Session"),
 	}
 	bnd, err := bundle.NewBundle(tf, path, 20)
 	if err != nil {
@@ -161,7 +165,7 @@ func (session *Session) Recheck() error {
 func (session *Session) run() {
 	err := session.trackerList.Start()
 	if err != nil {
-		fmt.Printf("Error starting trackers: %v\n", err)
+		session.logger.Error(fmt.Sprintf("Error starting trackers: %v\n", err))
 	}
 	for session.running {
 		if session.Bundle.Complete { // Seeding
@@ -179,29 +183,15 @@ func (session *Session) run() {
 
 			session.checkCancelled()
 
-			if debugopts.SESSION_DEBUG {
-				fmt.Println("Session getting block requests from bundle...")
-			}
-
 			// Assign blocks to queue from bundle
 			session.getBlocksFromBundle()
 
-			if debugopts.SESSION_DEBUG {
-				fmt.Printf("Session blockqueue length: %d\n", len(session.BlockQueue))
-			}
+			session.logger.Debug(fmt.Sprintf("Session blockqueue length: %d\n", len(session.BlockQueue)))
 
 			session.assignParts()
 
-			if debugopts.SESSION_DEBUG {
-				fmt.Println("Session getting requests in...")
-			}
-
 			// Check for requests
 			session.checkRequests()
-
-			if debugopts.SESSION_DEBUG {
-				fmt.Println("Session getting responses in...")
-			}
 
 			// Check for responses
 			session.checkResponses()
@@ -215,28 +205,14 @@ func (session *Session) run() {
 
 			// Check for new peers connecting
 
-			fmt.Print("Session bitfield: ")
-			session.Bundle.Bitfield.Print()
-
 			// Check for new peers to connect to
 			session.UpdatePeerInfo()
-			if debugopts.SESSION_DEBUG {
-				fmt.Printf("Current peers (max %d): \nConnected: %d\nConnecting: %d\nUnconnected: %d\n", session.maxPeers, len(session.ConnectedPeers), len(session.ConnectingPeers), len(session.UnconnectedPeers))
-			}
+			session.logger.Debug(fmt.Sprintf("Current peers (max %d): \nConnected: %d\nConnecting: %d\nUnconnected: %d\n", session.maxPeers, len(session.ConnectedPeers), len(session.ConnectingPeers), len(session.UnconnectedPeers)))
 			if len(session.ConnectedPeers)+len(session.ConnectingPeers) < session.maxPeers && len(session.UnconnectedPeers) > 0 {
 				go session.findNewPeer()
 			}
 
-			if debugopts.SESSION_DEBUG {
-				fmt.Printf("Session Rates: Down: %f KB/s Up: %f KB/s\n", session.downloadRateKB, session.uploadRateKB)
-			}
-
-			if debugopts.SESSION_DEBUG_simple {
-				fmt.Printf("Session:\nDownloadRate: %f kbps\nUploadRate: %f kbps\nQueueLength: %d\nPeers:\n\tID\t\t\tIP\t\tPort\tDownloaded\tUploaded\n", session.downloadRateKB, session.uploadRateKB, len(session.BlockQueue))
-				for _, curPeer := range session.Peers {
-					fmt.Printf("\t%s\t%s\t%d\t%d\t\t%d\n", sanitize(curPeer.RemotePeerID), curPeer.RemoteIP, curPeer.RemotePort, curPeer.TotalBytesDownloaded, curPeer.TotalBytesUploaded)
-				}
-			}
+			session.logger.Debug(fmt.Sprintf("Rates: Down: %f KB/s Up: %f KB/s\n", session.downloadRateKB, session.uploadRateKB))
 
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -334,7 +310,7 @@ func (session *Session) checkRequests() {
 				}
 				nextResponse, err := session.Bundle.GetBlock(&req.Info)
 				if err != nil {
-					fmt.Printf("err loading block: (%d, %d, %d) for response: %v\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, err)
+					session.logger.Error(fmt.Sprintf("err loading block: (%d, %d, %d) for response: %v\n", req.Info.PieceIndex, req.Info.BeginOffset, req.Info.Length, err))
 					continue
 				}
 				curPeer.QueueResponseOut(
@@ -366,7 +342,7 @@ func (session *Session) checkResponses() {
 				)
 				bi := bundle.BlockInfo{PieceIndex: int64(responses[0].PieceIndex), BeginOffset: int64(responses[0].BeginOffset), Length: int64(len(responses[0].Block))}
 				if err != nil {
-					fmt.Printf("error writing response (%d, %d) from peer(%s): %v\n", responses[0].PieceIndex, responses[0].BeginOffset, curPeer.RemotePeerID, err)
+					session.logger.Error(fmt.Sprintf("error writing response (%d, %d) from peer(%s): %v\n", responses[0].PieceIndex, responses[0].BeginOffset, curPeer.RemotePeerID, err))
 					session.Bundle.CancelBlock(&bi)
 				}
 				i := 0
@@ -387,10 +363,6 @@ func (session *Session) checkResponses() {
 func (session *Session) checkCancelled() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
-
-	if debugopts.SESSION_DEBUG {
-		fmt.Println("Session checking for cancelled requests...")
-	}
 
 	// Check for cancelled pieces
 	for _, curPeer := range session.Peers {
@@ -420,10 +392,6 @@ func (session *Session) checkCancelled() {
 func (session *Session) assignParts() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
-
-	if debugopts.SESSION_DEBUG {
-		fmt.Println("Session assigning requests to peers...")
-	}
 
 	if session.maxDownloadRateKB == 0 || session.downloadRateKB < session.maxDownloadRateKB {
 		now := time.Now()
@@ -505,9 +473,7 @@ func (session *Session) findNewPeer() {
 		session.UnconnectedPeers = append(session.UnconnectedPeers[:j], session.UnconnectedPeers[j+1:]...)
 		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
 		session.mux.Unlock()
-		if debugopts.SESSION_DEBUG {
-			fmt.Printf("session trying to connect to peer(%s:%d)...\n", peerInfo.IP, peerInfo.Port)
-		}
+		session.logger.Debug(fmt.Sprintf("session trying to connect to peer(%s:%d)...\n", peerInfo.IP, peerInfo.Port))
 		err := session.connectPeer(peerInfo)
 		if err != nil {
 			session.mux.Lock()
@@ -522,7 +488,7 @@ func (session *Session) findNewPeer() {
 			}
 			j++
 			session.mux.Unlock()
-			fmt.Printf("Session error connecting to peer: %v\n", err)
+			session.logger.Debug(fmt.Sprintf("error connecting to peer: %v\n", err))
 		} else {
 			session.mux.Lock()
 			i := 0

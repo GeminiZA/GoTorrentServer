@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -20,6 +21,7 @@ func main() {
 	if len(os.Args) > 2 {
 		arg := os.Args[2]
 		if arg == "test" {
+			logger := log.Default()
 			myPeerID := "-TR2940-6oFw2M6BdUkY"
 			if len(os.Args) < 4 {
 				panic("no package to test specified")
@@ -38,7 +40,7 @@ func main() {
 				}
 				TestSession(os.Args[4], myPeerID)
 			} else if testPkg == "tracker" {
-				TestTrackerList(os.Args[4], myPeerID)
+				TestTrackerList(os.Args[4], myPeerID, logger)
 			} else {
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
@@ -49,7 +51,7 @@ func main() {
 	}
 }
 
-func TestTrackerList(tfPath string, myPeerID string) {
+func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 	tf, err := torrentfile.ParseFile(tfPath)
 	if err != nil {
 		panic(err)

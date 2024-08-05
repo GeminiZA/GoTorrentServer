@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
@@ -92,6 +92,7 @@ type Peer struct {
 	lastUploadUpdate     time.Time
 
 	TimeConnected time.Time
+	logger        *logger.Logger
 }
 
 func Connect(
@@ -137,6 +138,8 @@ func Connect(
 		TotalBytesDownloaded: 0,
 		DownloadRateKB:       0,
 		UploadRateKB:         0,
+
+		logger: logger.New("ERROR", "Peer"),
 	}
 
 	d := net.Dialer{Timeout: time.Millisecond * 2000}
@@ -162,7 +165,7 @@ func Connect(
 	if !peer.bitField.Empty {
 		err = peer.sendBitField()
 		if err != nil {
-			fmt.Printf("Error sending bitfield to peer: %v\n", err)
+			peer.logger.Warn(fmt.Sprintf("Error sending bitfield to peer: %v\n", err))
 		}
 	}
 	peer.Keepalive = true
@@ -191,13 +194,13 @@ func (peer *Peer) Close() {
 	if !peer.AmChoking {
 		err := peer.sendChoke()
 		if err != nil {
-			fmt.Printf("Error sending choke to peer: %v", err)
+			peer.logger.Warn(fmt.Sprintf("Error sending choke to peer: %v", err))
 		}
 	}
 	if peer.AmInterested {
 		err := peer.sendNotInterested()
 		if err != nil {
-			fmt.Printf("Error sending not interested to peer: %v", err)
+			peer.logger.Warn(fmt.Sprintf("Error sending not interested to peer: %v", err))
 		}
 	}
 	peer.conn.Close()
@@ -425,7 +428,7 @@ func (peer *Peer) runOutgoing() {
 						if !peer.requestOutQueue[i].Sent {
 							err = peer.sendRequest(peer.requestOutQueue[i])
 							if err != nil {
-								fmt.Println("Error sending request to peer: ", err)
+								peer.logger.Warn(fmt.Sprintf("Error sending request to peer: %v\n", err))
 							}
 							peer.requestOutQueue[i].Sent = true
 							peer.requestOutQueue[i].ReqTime = time.Now()
@@ -435,54 +438,39 @@ func (peer *Peer) runOutgoing() {
 				}
 			}
 		}
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Done sending requests out...")
-		}
 
 		if len(peer.responseOutQueue) > 0 {
 			if !peer.AmChoking {
 				for len(peer.responseOutQueue) > 0 {
 					err = peer.sendPiece(peer.responseOutQueue[0])
 					if err != nil {
-						fmt.Println("Error sending piece to peer: ", err)
+						peer.logger.Warn(fmt.Sprintf("Error sending piece to peer: %v\n", err))
 					}
 					peer.responseOutQueue = peer.responseOutQueue[1:]
 				}
 			}
-		}
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Done sending responses out...")
 		}
 
 		// Send keep alive
 		if time.Now().After(peer.timeLastSent.Add(20 * time.Second)) {
 			err = peer.sendKeepAlive()
 			if err != nil {
-				fmt.Println("Error sending keep alive: ", err)
+				peer.logger.Warn(fmt.Sprintf("Error sending keep alive: %v\n", err))
 			}
 		}
 
 		// Handle timed pieces
 
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Handling timed blocks:")
-		}
 		i := 0
 		for i < len(peer.requestOutQueue) {
 			if peer.requestOutQueue[i].Sent && time.Now().After(peer.requestOutQueue[i].ReqTime.Add(BLOCK_REQUEST_TIMEOUT_MS*time.Millisecond)) {
-				if debugopts.PEER_DEBUG {
-					fmt.Printf("Block: (%d, %d, %d) timed\n", peer.requestOutQueue[i].Info.PieceIndex, peer.requestOutQueue[i].Info.BeginOffset, peer.requestOutQueue[i].Info.Length)
-				}
+				peer.logger.Debug(fmt.Sprintf("Block: (%d, %d, %d) timed\n", peer.requestOutQueue[i].Info.PieceIndex, peer.requestOutQueue[i].Info.BeginOffset, peer.requestOutQueue[i].Info.Length))
 				peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue[i])
 				peer.requestOutQueue = append(peer.requestOutQueue[:i], peer.requestOutQueue[i+1:]...)
 				continue
 			} else {
 				i++
 			}
-		}
-
-		if debugopts.PEER_DEBUG {
-			fmt.Println("Done handling timed pieces...")
 		}
 
 		time.Sleep(100 * time.Millisecond)
@@ -500,12 +488,12 @@ func (peer *Peer) runIncoming() {
 					break
 					// fmt.Println("No new message")
 				} else {
-					fmt.Println("Error reading message from peer: ", err)
+					peer.logger.Warn(fmt.Sprintf("Error reading message from peer: %v\n", err))
 				}
 			} else {
 				err = peer.handleMessageIn(msgIn)
 				if err != nil {
-					fmt.Println("Error handling message from peer: ", err)
+					peer.logger.Warn(fmt.Sprintf("Error handling message from peer: %v\n", err))
 				}
 			}
 		}
@@ -547,17 +535,13 @@ func (peer *Peer) readHandshake() error {
 	if n != 68 {
 		return errors.New("invalid handshake length")
 	}
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Read handshake bytes from peer: %x\n", handshakeBytes)
-	}
+	peer.logger.Debug(fmt.Sprintf("Read handshake bytes from peer: %x\n", handshakeBytes))
 	handshakeMsg, err := message.ParseHandshake(handshakeBytes)
 	if err != nil {
 		return err
 	}
 
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Handshake successfully read from peer(%s)...\n", peer.RemoteIP)
-	}
+	peer.logger.Debug(fmt.Sprintf("Handshake successfully read from peer(%s)...\n", peer.RemoteIP))
 	peer.RemotePeerID = handshakeMsg.PeerID
 	//	if peer.RemotePeerID != handshakeMsg.PeerID {
 	//return errors.New("peerID mismatch")
@@ -579,9 +563,7 @@ func (peer *Peer) sendHandshake() error {
 	if n != 68 {
 		return errors.New("handshake send incomplete")
 	}
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sent handshake to peer(%s)...\n", peer.RemoteIP)
-	}
+	peer.logger.Debug(fmt.Sprintf("Sent handshake to peer(%s)...\n", peer.RemoteIP))
 	if peer.bitField != nil && peer.bitField.NumSet > 0 {
 		err = peer.sendBitField()
 		if err != nil {
@@ -660,7 +642,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			return nil
 		}
 		peer.responseInQueue = append(peer.responseInQueue, newRes)
-		fmt.Printf("Response added to responseInQueue\n")
+		peer.logger.Debug(fmt.Sprintf("Response added to responseInQueue\n"))
 	case message.CANCEL:
 		req := &blockRequest{
 			Info: bundle.BlockInfo{
@@ -702,10 +684,7 @@ func (peer *Peer) sendMessage(msg *message.Message) error {
 	}
 	const MESSAGE_SEND_TIMEOUT = 1000
 	peer.conn.SetWriteDeadline(time.Now().Add(MESSAGE_SEND_TIMEOUT * time.Millisecond))
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Sending msg to peer(%s): ", peer.RemoteIP)
-		msg.Print()
-	}
+	peer.logger.Debug(fmt.Sprintf("Sending msg to peer(%s): %s", peer.RemoteIP, msg.Print()))
 	msgBytes := msg.GetBytes()
 	n, err := peer.conn.Write(msgBytes)
 	if err != nil {
@@ -813,13 +792,9 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	}
 	msgLen := int(binary.BigEndian.Uint32(msgLenBytes))
 	if msgLen > MAX_MESSAGE_LENGTH {
-		fmt.Printf("%x\n", msgLenBytes)
-		// panic("message length exceeds max")
 		return nil, errors.New("message length exceeds max of 17kb")
 	}
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Message Length read: %d (0x%x)\n", msgLen, msgLenBytes)
-	}
+	peer.logger.Debug(fmt.Sprintf("Message Length read: %d (0x%x)\n", msgLen, msgLenBytes))
 	if msgLen == 0 {
 		return message.NewKeepAlive(), nil
 	}
@@ -842,9 +817,6 @@ func (peer *Peer) readMessage() (*message.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	if debugopts.PEER_DEBUG {
-		fmt.Printf("Peer (%s) Got message: ", peer.RemoteIP)
-	}
-	msg.Print()
+	peer.logger.Debug(fmt.Sprintf("Peer (%s) Got message: %s\n", peer.RemoteIP, msg.Print()))
 	return msg, nil
 }

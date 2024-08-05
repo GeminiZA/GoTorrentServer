@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
@@ -39,6 +40,7 @@ type Bundle struct {
 	Complete    bool
 	pieceCache  *PieceCache
 	mux         sync.Mutex
+	logger      *logger.Logger
 }
 
 func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheCapacity int) (*Bundle, error) {
@@ -49,6 +51,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		Path:        bundlePath,
 		pieceCache:  NewPieceCache(pieceCacheCapacity),
 		InfoHash:    metaData.InfoHash,
+		logger:      logger.New("WARN", "Bundle"),
 	}
 	totalLength := int64(0)
 	// Files
@@ -87,12 +90,11 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		totalLength = metaData.Info.Length
 	}
 	bundle.Length = totalLength
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Println("Got files...")
-		for _, file := range bundle.Files {
-			fmt.Printf("Path: %s, Length: %d\n", file.Path, file.Length)
-		}
+	msg := "Got files...\n"
+	for _, file := range bundle.Files {
+		msg += fmt.Sprintf("Path: %s, Length: %d\n", file.Path, file.Length)
 	}
+	bundle.logger.Debug(msg)
 	if metaData.Info.PieceLength == 0 {
 		return nil, errors.New("no piece length")
 	}
@@ -112,12 +114,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 		curByte += curPieceLength
 	}
 	bundle.NumPieces = int64(len(bundle.Pieces))
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("Got pieces (%d)\n", bundle.NumPieces)
-		//		for i, piece := range bundle.Pieces {
-		//fmt.Printf("Piece %d hash: %v\n", i, piece.hash)
-		//}
-	}
+	bundle.logger.Debug(fmt.Sprintf("Got pieces (%d)\n", bundle.NumPieces))
 
 	// bitfield
 
@@ -128,9 +125,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 	filesExist := false
 	for _, bundleFile := range bundle.Files {
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
-			if debugopts.BUNDLE_DEBUG {
-				fmt.Printf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length)
-			}
+			bundle.logger.Debug(fmt.Sprintf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length))
 			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0755)
 			if err != nil {
 				return nil, err
@@ -149,7 +144,7 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 	}
 	if filesExist {
 		err := bundle.Recheck()
-		fmt.Printf("Error rechecking: %v\n", err)
+		bundle.logger.Error(fmt.Sprintf("Error rechecking: %v\n", err))
 	}
 
 	return &bundle, nil
@@ -159,9 +154,6 @@ func checkFile(path string, length int64) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false
-	}
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("File info: (%s): length: %d / %d\n", path, info.Size(), length)
 	}
 	if info.Size() != length {
 		return false
@@ -174,7 +166,7 @@ func (bundle *Bundle) DeleteFiles() error {
 		for _, fileInfo := range bundle.Files {
 			err := os.Remove(fileInfo.Path)
 			if err != nil {
-				fmt.Printf("Error deleting file (%s): %v\n", fileInfo.Path, err)
+				bundle.logger.Error(fmt.Sprintf("Error deleting file (%s): %v\n", fileInfo.Path, err))
 			}
 		}
 	}
@@ -190,9 +182,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 		return err
 	}
 	if bundle.Pieces[pieceIndex].Complete {
-		if debugopts.BUNDLE_DEBUG {
-			fmt.Printf("Pieces[%d] complete... writing piece...\n", pieceIndex)
-		}
+		bundle.logger.Debug(fmt.Sprintf("Pieces[%d] complete... writing piece...\n", pieceIndex))
 		bundle.Bitfield.SetBit(pieceIndex)
 		err := bundle.writePiece(pieceIndex)
 		if err != nil {
@@ -200,14 +190,11 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 		}
 	}
 	if bundle.Bitfield.Complete {
-		fmt.Println("Bundle download complete!!!!!")
 		bundle.Complete = true
 	}
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("Saved block: index: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, len(block))
-		fmt.Printf("Current state: ")
-		bundle.Bitfield.Print()
-	}
+	msg := fmt.Sprintf("Saved block: index: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, len(block))
+	msg += fmt.Sprintf("Current state: ")
+	msg += bundle.Bitfield.Print()
 	return err
 }
 
@@ -370,20 +357,19 @@ func (bundle *Bundle) BytesLeft() int64 {
 	return (bundle.Bitfield.Len() - bundle.Bitfield.NumSet) * bundle.PieceLength
 }
 
-func (bundle *Bundle) PrintStatus() {
-	fmt.Printf("Bundle status: \n")
-	fmt.Printf("InfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
+func (bundle *Bundle) PrintStatus() string {
+	return fmt.Sprintf("Bundle status: \nInfoHash: %x\nHave: %d\nTotal Pieces: %d\n", bundle.InfoHash, bundle.Bitfield.NumSet, bundle.NumPieces)
 }
 
 func (bundle *Bundle) Recheck() error {
 	if debugopts.BUNDLE_DEBUG {
-		fmt.Println("Rechecking bundle...")
+		bundle.logger.Debug(fmt.Sprintln("Rechecking bundle..."))
 	}
 	bundle.Bitfield.ResetAll()
 	for pieceIndex := int64(0); pieceIndex < int64(len(bundle.Pieces)); pieceIndex++ {
 		pieceBytes, err := bundle.readPiece(pieceIndex)
 		if err != nil {
-			fmt.Printf("Error reading piece: %v\n", err)
+			bundle.logger.Error(fmt.Sprintf("Error reading piece: %v\n", err))
 			return err
 		}
 		// fmt.Printf("Read bytes for piece(%d): %x\n", pieceIndex, pieceBytes)
@@ -398,10 +384,7 @@ func (bundle *Bundle) Recheck() error {
 			bundle.Bitfield.SetBit(pieceIndex)
 		}
 	}
-	if debugopts.BUNDLE_DEBUG {
-		fmt.Printf("Recheck complete bitfield: ")
-		bundle.Bitfield.Print()
-	}
+	bundle.logger.Debug(fmt.Sprintf("Recheck complete bitfield: %s", bundle.Bitfield.Print()))
 	bundle.Complete = bundle.Bitfield.Complete
 	return nil
 }

@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/client"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
@@ -42,6 +44,8 @@ func main() {
 				TestSession(os.Args[4], myPeerID)
 			case "tracker":
 				TestTrackerList(os.Args[4], myPeerID, logger)
+			case "client":
+				TestClient(os.Args[4])
 			default:
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
@@ -53,6 +57,16 @@ func main() {
 	}
 }
 
+func TestClient(tfPath string) {
+	tc, err := client.Start()
+	defer tc.Stop()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	time.Sleep(5 * time.Second)
+}
+
 func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 	tf := torrentfile.New()
 	err := tf.ParseFile(tfPath)
@@ -60,7 +74,7 @@ func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 		panic(err)
 	}
 	fmt.Println("Torrentfile succesfully parsed")
-	bdl, err := bundle.NewBundle(tf, "./TestBundle", 20)
+	bdl, err := bundle.NewBundle(tf, bitfield.New(int64(len(tf.Info.Pieces))), "./TestBundle", 20)
 	if err != nil {
 		panic(err)
 	}
@@ -87,7 +101,7 @@ func TestSession(tfPath string, myPeerID string) {
 	}
 	fmt.Println("Torrentfile succesfully parsed")
 	listenPort := uint16(6681)
-	sesh, err := session.New("./TestBundle", tf, listenPort, myPeerID)
+	sesh, err := session.New("./TestBundle", tf, bitfield.New(int64(len(tf.Info.Pieces))), listenPort, myPeerID)
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +127,7 @@ func TestPeer(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	fmt.Println("Torrentfile succesfully parsed")
-	bdl, err := bundle.NewBundle(tf, "./TestBundle", 20)
+	bdl, err := bundle.NewBundle(tf, bitfield.New(int64(len(tf.Info.Pieces))), "./TestBundle", 20)
 	if err != nil {
 		panic(err)
 	}

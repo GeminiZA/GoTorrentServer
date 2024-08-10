@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/logger"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
@@ -65,7 +66,7 @@ func (bra *blockRequest) Equal(brb *blockRequest) bool {
 
 // Exported
 
-func New(path string, tf *torrentfile.TorrentFile, listenPort uint16, peerID string) (*Session, error) {
+func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listenPort uint16, peerID string) (*Session, error) {
 	session := Session{
 		Peers:                   make([]*peer.Peer, 0, 20),
 		Path:                    path,
@@ -87,7 +88,7 @@ func New(path string, tf *torrentfile.TorrentFile, listenPort uint16, peerID str
 
 		logger: logger.New("DEBUG", "Session"),
 	}
-	bnd, err := bundle.NewBundle(tf, path, 20)
+	bnd, err := bundle.NewBundle(tf, bf, path, 20)
 	if err != nil {
 		return nil, err
 	}

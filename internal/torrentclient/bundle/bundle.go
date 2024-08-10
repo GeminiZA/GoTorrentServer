@@ -43,7 +43,7 @@ type Bundle struct {
 	logger      *logger.Logger
 }
 
-func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheCapacity int) (*Bundle, error) {
+func NewBundle(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath string, pieceCacheCapacity int) (*Bundle, error) {
 	bundle := Bundle{
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
@@ -118,11 +118,10 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 
 	// bitfield
 
-	bundle.Bitfield = bitfield.New(bundle.NumPieces)
+	bundle.Bitfield = bf
 
 	// Write files
 
-	filesExist := false
 	for _, bundleFile := range bundle.Files {
 		if !checkFile(bundleFile.Path, bundleFile.Length) {
 			bundle.logger.Debug(fmt.Sprintf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length))
@@ -138,15 +137,8 @@ func NewBundle(metaData *torrentfile.TorrentFile, bundlePath string, pieceCacheC
 					return nil, err
 				}
 			}
-		} else {
-			filesExist = true
 		}
 	}
-	if filesExist {
-		err := bundle.Recheck()
-		bundle.logger.Error(fmt.Sprintf("Error rechecking: %v\n", err))
-	}
-
 	return &bundle, nil
 }
 
@@ -193,7 +185,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 		bundle.Complete = true
 	}
 	msg := fmt.Sprintf("Saved block: index: %d, offset: %d, length: %d\n", pieceIndex, beginOffset, len(block))
-	msg += fmt.Sprintf("Current state: ")
+	msg += "Current state: "
 	msg += bundle.Bitfield.Print()
 	return err
 }

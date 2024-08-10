@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 )
 
@@ -53,6 +54,7 @@ type Tracker struct {
 	udpBuff              []byte
 	connectionIDRecvTime time.Time
 	timeoutStep          int
+	logger               *logger.Logger
 }
 
 func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
@@ -78,6 +80,8 @@ func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded in
 		udpBuff:              nil,
 		connectionIDRecvTime: time.Time{},
 		timeoutStep:          0,
+
+		logger: logger.New("DEBUG", "Tracker"),
 	}
 }
 
@@ -93,7 +97,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 		return fmt.Errorf("Start failure; failure reasion: %v", failure)
 	}
 	if warning, ok := bodyDict["warning message"]; ok {
-		fmt.Printf("Start Warning; warning message: %v", warning)
+		tracker.logger.Warn(fmt.Sprintf("Start Warning; warning message: %v", warning))
 	}
 	if interval, ok := bodyDict["interval"]; ok {
 		if intervalStr, ok := interval.(string); ok {
@@ -147,9 +151,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 					peersList = append(peersList, mp)
 				}
 			}
-			if debugopts.TRACKER_DEBUG {
-				fmt.Printf("Found peers: \n")
-			}
+			tracker.logger.Debug(fmt.Sprintf("Found peers: \n"))
 			for _, peer := range peersList {
 				peerIP, ok := peer["ip"].(string)
 				if !ok {
@@ -159,9 +161,7 @@ func (tracker *Tracker) parseBody(body []byte) error {
 				if !ok {
 					return errors.New("peerid not string")
 				}
-				if debugopts.TRACKER_DEBUG {
-					fmt.Printf("IP: %s; Port: %d\n", peerIP, int(peerPort))
-				}
+				tracker.logger.Debug(fmt.Sprintf("IP: %s; Port: %d\n", peerIP, int(peerPort)))
 				tracker.Peers = append(tracker.Peers, &PeerInfo{IP: peerIP, Port: int(peerPort)})
 			}
 		}
@@ -173,13 +173,13 @@ func (tracker *Tracker) parseBody(body []byte) error {
 
 func (tracker *Tracker) Start() {
 	if !tracker.instantiated {
-		fmt.Printf("tracker incorrectly instantiated")
+		tracker.logger.Error("tracker incorrectly instantiated")
 		return
 	}
 	err := tracker.announce(2)
 	if err != nil {
 		tracker.TrackerError = err
-		fmt.Printf("error announcing to tracker (%s): %v\n", tracker.TrackerUrl, err)
+		tracker.logger.Error(fmt.Sprintf("error announcing to tracker (%s): %v\n", tracker.TrackerUrl, err))
 	} else { // Successfully announced
 		tracker.Stopped = false
 		tracker.running = true
@@ -216,9 +216,7 @@ func (tracker *Tracker) announce(event int) error {
 		params.Add("event", "stopped")
 	}
 
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
-	}
+	tracker.logger.Debug(fmt.Sprintf("Sending request to tracker: %s\n", fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode())))
 	res, err := http.Get(fmt.Sprintf("%s?%s", tracker.TrackerUrl, params.Encode()))
 	if err != nil {
 		return err
@@ -230,10 +228,6 @@ func (tracker *Tracker) announce(event int) error {
 	}
 
 	defer res.Body.Close()
-
-	if debugopts.TRACKER_DEBUG {
-		fmt.Println("Got tracker response")
-	}
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -277,13 +271,11 @@ func (tracker *Tracker) Stop() {
 	tracker.running = false
 	tracker.mux.Unlock()
 
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Tracker(%s) stopping...\n", tracker.TrackerUrl)
-	}
+	tracker.logger.Debug(fmt.Sprintf("Tracker(%s) stopping...\n", tracker.TrackerUrl))
 
 	err := tracker.announce(3)
 	if err != nil {
-		fmt.Printf("error stopping tracker(%s): %v\n", tracker.TrackerUrl, err)
+		tracker.logger.Error(fmt.Sprintf("error stopping tracker(%s): %v\n", tracker.TrackerUrl, err))
 	}
 	tracker.mux.Lock()
 	tracker.Stopped = true
@@ -313,27 +305,25 @@ func (tracker *Tracker) SetLeft(left int64) {
 
 func (tracker *Tracker) run() {
 	for tracker.running {
-		if debugopts.TRACKER_DEBUG {
-			fmt.Printf("Tracker(%s) running...\n", tracker.TrackerUrl)
-		}
+		tracker.logger.Debug(fmt.Sprintf("Tracker(%s) running...\n", tracker.TrackerUrl))
 		time.Sleep(time.Second)
 		if tracker.announceErrorCount > 0 || tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
 			err := tracker.announce(0)
 			if err != nil {
 				tracker.TrackerError = err
 				tracker.announceErrorCount++
-				fmt.Printf("Error in tracker running (%d/5): %v\n", tracker.announceErrorCount, err)
+				tracker.logger.Error(fmt.Sprintf("Error in tracker running (%d/5): %v\n", tracker.announceErrorCount, err))
 				if tracker.announceErrorCount > 5 {
-					fmt.Printf("Stopping tracker: %s\n", tracker.TrackerUrl)
+					tracker.logger.Error(fmt.Sprintf("Stopping tracker: %s\n", tracker.TrackerUrl))
 					return
 				}
 			} else {
 				tracker.announceErrorCount = 0
-				fmt.Printf("Tracker reannounced...\n")
+				tracker.logger.Debug("Tracker reannounced...\n")
 			}
 		}
 	}
-	fmt.Printf("Tracker stopped...\n")
+	tracker.logger.Debug("Tracker stopped...\n")
 }
 
 // UDP announce
@@ -347,9 +337,6 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 		if err != nil {
 			return err
 		}
-	}
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Sending announce to udp tracker(%s)...\n", tracker.TrackerUrl)
 	}
 	transactionID := uint32(rand.Int())
 	announceBytes := make([]byte, 98)
@@ -366,9 +353,6 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 	binary.BigEndian.PutUint32(announceBytes[88:], uint32(rand.Int())) // key // used for ipv6
 	binary.BigEndian.PutUint32(announceBytes[92:], uint32(0xFFFFFFFF)) // num wanted // defaulted to -1
 	binary.BigEndian.PutUint16(announceBytes[96:], uint16(tracker.Port))
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Sending: %x\n", announceBytes)
-	}
 	_, err := tracker.udpConn.Write(announceBytes)
 	if err != nil {
 		return err
@@ -387,7 +371,7 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr.Timeout() {
-				fmt.Printf("err reading udp tracker announce response: %v\n", err)
+				tracker.logger.Error(fmt.Sprintf("err reading udp tracker announce response: %v\n", err))
 				tracker.timeoutStep++
 				continue
 			} else {
@@ -398,9 +382,7 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 			return errors.New("udp tracker announce response < 20 bytes")
 		} else {
 			responseLength = n
-			if debugopts.TRACKER_DEBUG {
-				fmt.Printf("Got response(%d): %x\n", n, responseBuffer[:n])
-			}
+			tracker.logger.Debug(fmt.Sprintf("Got response(%d): %x\n", n, responseBuffer[:n]))
 			tracker.timeoutStep = 0
 			break
 		}
@@ -422,17 +404,12 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 	tracker.Leechers = int64(responseLeechers)
 	responseSeeders := binary.BigEndian.Uint32(responseBuffer[16:20])
 	tracker.Seeders = int64(responseSeeders)
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Got: \nAction: %d\nTransactionID: 0x%x\nInterval: %d\nLeechers: %d\nSeeders: %d\nGetting peers...\n", responseAction, responseTransactionID, responseInterval, responseLeechers, responseSeeders)
-	}
+	tracker.logger.Debug(fmt.Sprintf("Got: \nAction: %d\nTransactionID: 0x%x\nInterval: %d\nLeechers: %d\nSeeders: %d\nGetting peers...\n", responseAction, responseTransactionID, responseInterval, responseLeechers, responseSeeders))
 	newPeers := make([]*PeerInfo, 0)
 	for curByteIndex := 20; curByteIndex+6 <= responseLength; curByteIndex += 6 {
 		newPeerIPBytes := responseBuffer[curByteIndex : curByteIndex+4]
 		newPeerIPStr := fmt.Sprintf("%d.%d.%d.%d", newPeerIPBytes[0], newPeerIPBytes[1], newPeerIPBytes[2], newPeerIPBytes[3])
 		newPeerPort := int(binary.BigEndian.Uint16(responseBuffer[curByteIndex+4 : curByteIndex+6]))
-		if debugopts.TRACKER_DEBUG {
-			fmt.Printf("Got peer: %s:%d...\n", newPeerIPStr, newPeerPort)
-		}
 		found := false
 		for _, peer := range tracker.Peers {
 			if peer.IP == newPeerIPStr && peer.Port == newPeerPort {
@@ -450,17 +427,12 @@ func (tracker *Tracker) udpAnnounce(event int) error { // event 0: none, 1: comp
 		}
 	}
 	tracker.Peers = append(tracker.Peers, newPeers...)
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("%v\n", tracker.Peers)
-	}
 	return nil
 }
 
 func (tracker *Tracker) udpConnect() error {
 	url, err := url.Parse(tracker.TrackerUrl)
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Trying to connect to udp tracker on: %s\n", url.Host)
-	}
+	tracker.logger.Debug(fmt.Sprintf("Trying to connect to udp tracker on: %s\n", url.Host))
 	if err != nil {
 		return err
 	}
@@ -474,16 +446,12 @@ func (tracker *Tracker) udpConnect() error {
 		return err
 	}
 	tracker.udpConn = conn
-	fmt.Println("Conn established...")
 	// {constant (8), action (4), transaction id (4)}
 	connectRequestBytes := make([]byte, 16)
 	binary.BigEndian.PutUint64(connectRequestBytes[0:], 0x41727101980)
 	binary.BigEndian.PutUint64(connectRequestBytes[8:], 0) // action 0: connect
 	transactionID := uint32(rand.Int())
 	binary.BigEndian.PutUint32(connectRequestBytes[12:], transactionID)
-	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Writing: %x\n", connectRequestBytes)
-	}
 	_, err = tracker.udpConn.Write(connectRequestBytes)
 	if err != nil {
 		return err
@@ -495,7 +463,7 @@ func (tracker *Tracker) udpConnect() error {
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr.Timeout() {
-				fmt.Printf("err (%d/5) reading udp tracker connect response: %v\n", tracker.timeoutStep, err)
+				tracker.logger.Error(fmt.Sprintf("err (%d/5) reading udp tracker connect response: %v\n", tracker.timeoutStep, err))
 				tracker.timeoutStep++
 				continue
 			} else {
@@ -506,7 +474,6 @@ func (tracker *Tracker) udpConnect() error {
 			return errors.New("udp tracker response < 16 bytes")
 		} else {
 			tracker.timeoutStep = 0
-			fmt.Printf("Read response: %x\n", responseBuffer[:n])
 			break
 		}
 	}
@@ -524,7 +491,7 @@ func (tracker *Tracker) udpConnect() error {
 		return errors.New("udp tracker connect action not connect")
 	}
 	if debugopts.TRACKER_DEBUG {
-		fmt.Printf("Parsed connect response:\nAction: %d\nTransactionID: 0x%x\nConnectionID: 0x%x\n", responseAction, responseTransactionID, responseConnectionID)
+		tracker.logger.Debug(fmt.Sprintf("Parsed connect response:\nAction: %d\nTransactionID: 0x%x\nConnectionID: 0x%x\n", responseAction, responseTransactionID, responseConnectionID))
 	}
 	tracker.connectionIDRecvTime = time.Now()
 	tracker.connectionID = responseConnectionID

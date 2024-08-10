@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
 )
 
@@ -25,6 +25,8 @@ type TrackerList struct {
 	Peers        []*tracker.PeerInfo
 	running      bool
 	mux          sync.Mutex
+
+	logger *logger.Logger
 }
 
 func New(
@@ -56,6 +58,7 @@ func New(
 		Peers:        make([]*tracker.PeerInfo, 0),
 		running:      false,
 		Trackers:     make([]*tracker.Tracker, 0),
+		logger:       logger.New("DEBUG", "TrackerList"),
 	}
 }
 
@@ -76,18 +79,14 @@ func (tl *TrackerList) Start() error {
 			)
 			tl.Trackers = append(tl.Trackers, newTracker)
 			go newTracker.Start()
-			if debugopts.TRACKER_DEBUG {
-				fmt.Printf("Started tracker: %s\n", newTracker.TrackerUrl)
-			}
+			tl.logger.Debug(fmt.Sprintf("Started tracker: %s\n", newTracker.TrackerUrl))
 		}
 	}
 	return nil
 }
 
 func (tl *TrackerList) Stop() {
-	if debugopts.TRACKER_DEBUG {
-		fmt.Println("Stopping all trackers...")
-	}
+	tl.logger.Debug("Stopping all trackers...")
 	tl.running = false
 	for _, tr := range tl.Trackers {
 		go tr.Stop()
@@ -104,7 +103,7 @@ func (tl *TrackerList) SetComplete() {
 	for _, tr := range tl.Trackers {
 		err := tr.Complete()
 		if err != nil {
-			fmt.Printf("Error setting complete on tracker(%s): %v\n", tr.TrackerUrl, err)
+			tl.logger.Error(fmt.Sprintf("Error setting complete on tracker(%s): %v\n", tr.TrackerUrl, err))
 		}
 	}
 }

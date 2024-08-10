@@ -12,7 +12,6 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/listenserver"
-	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
@@ -27,16 +26,16 @@ type TorrentClient struct {
 	bitfields    []*bitfield.Bitfield
 	dbc          *database.DBConn
 	listenServer *listenserver.ListenServer
-	peerInChan   chan<- *peer.Peer
-	running      bool
-	mux          sync.Mutex
+	// peerInChan   chan<- *peer.Peer
+	running bool
+	mux     sync.Mutex
 }
 
 func Start() (*TorrentClient, error) {
 	var err error
 	client := &TorrentClient{
-		sessions:   make([]*session.Session, 0),
-		peerInChan: make(chan<- *peer.Peer, 10),
+		sessions: make([]*session.Session, 0),
+		// peerInChan: make(chan<- *peer.Peer, 10),
 	}
 	client.dbc, err = database.Connect()
 	if err != nil {
@@ -65,8 +64,9 @@ func (client *TorrentClient) Stop() error {
 func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPath string, start bool) error {
 	client.mux.Lock()
 	defer client.mux.Unlock()
+	tf := torrentfile.New()
 
-	tf, err := torrentfile.ParseFile(torrentfilePath)
+	err := tf.ParseFile(torrentfilePath)
 	if err != nil {
 		return err
 	}
@@ -98,8 +98,8 @@ func AddTorrentFromURL(magnet string) error {
 func (client *TorrentClient) runClient() {
 	for client.running {
 		client.updateDatabase()
-		// client.processIncomingClients()
-		time.Sleep(time.Millisecond * 500)
+		client.processIncomingClients()
+		time.Sleep(time.Millisecond * 1000)
 	}
 }
 

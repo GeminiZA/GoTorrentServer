@@ -27,23 +27,25 @@ func main() {
 				panic("no package to test specified")
 			}
 			testPkg := os.Args[3]
-			if testPkg == "peer" {
+			switch testPkg {
+			case "peer":
 				// Peer test
 				if len(os.Args) < 5 {
 					panic("in peer test no torrent file specified")
 				}
 				fmt.Printf("Testing peer with file: %s\n", os.Args[4])
 				TestPeer(os.Args[4], myPeerID)
-			} else if testPkg == "session" {
+			case "session":
 				if len(os.Args) < 5 {
 					panic("in peer test no torrent file specified")
 				}
 				TestSession(os.Args[4], myPeerID)
-			} else if testPkg == "tracker" {
+			case "tracker":
 				TestTrackerList(os.Args[4], myPeerID, logger)
-			} else {
+			default:
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
+
 		} else {
 			fmt.Println("Server not implemented")
 			// Run server
@@ -52,7 +54,8 @@ func main() {
 }
 
 func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
-	tf, err := torrentfile.ParseFile(tfPath)
+	tf := torrentfile.New()
+	err := tf.ParseFile(tfPath)
 	if err != nil {
 		panic(err)
 	}
@@ -77,7 +80,8 @@ func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 }
 
 func TestSession(tfPath string, myPeerID string) {
-	tf, err := torrentfile.ParseFile(tfPath)
+	tf := torrentfile.New()
+	err := tf.ParseFile(tfPath)
 	if err != nil {
 		panic(err)
 	}
@@ -103,7 +107,8 @@ func TestSession(tfPath string, myPeerID string) {
 func TestPeer(tfPath string, myPeerID string) {
 	fmt.Println("Starting peer test...")
 	// Connect to a peer
-	tf, err := torrentfile.ParseFile(tfPath)
+	tf := torrentfile.New()
+	err := tf.ParseFile(tfPath)
 	if err != nil {
 		panic(err)
 	}

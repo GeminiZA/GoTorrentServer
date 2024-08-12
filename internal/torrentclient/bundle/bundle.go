@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
@@ -43,102 +44,179 @@ type Bundle struct {
 	logger      *logger.Logger
 }
 
-func NewBundle(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath string, pieceCacheCapacity int) (*Bundle, error) {
+// Create files, if exist recheck
+func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, error) {
 	bundle := Bundle{
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
 		Complete:    false,
 		Path:        bundlePath,
-		pieceCache:  NewPieceCache(pieceCacheCapacity),
+		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
 		logger:      logger.New("WARN", "Bundle"),
 	}
-	totalLength := int64(0)
+	// Check existence
+	// Create bundle Path
+	if _, err := os.Stat(bundle.Path); err != nil {
+		err := os.MkdirAll(bundle.Path, 0755)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Files
 	if metaData.Info.Length == 0 {
 		bundle.MultiFile = true
 		curByte := int64(0)
+		bundle.Files = make([]*BundleFile, 0)
 		for _, file := range metaData.Info.Files {
-			path := ""
-			if len(bundle.Path) > 0 {
-				path = fmt.Sprintf("%s/%s", bundle.Path, metaData.Info.Name)
-				err := os.MkdirAll(path, 0755)
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				path = fmt.Sprintf("./%s", metaData.Info.Name)
+			curBundleFile := BundleFile{
+				Path:      bundle.Path,
+				Length:    file.Length,
+				ByteStart: curByte,
 			}
-			curBundleFile := BundleFile{ByteStart: curByte, Length: file.Length, Path: path}
 			curByte += file.Length
-			totalLength += file.Length
 			for index, pathPiece := range file.Path {
-				curBundleFile.Path += fmt.Sprintf("/%s", pathPiece)
-				if index != len(file.Path)-1 {
+				if index != len(file.Path) {
+					curBundleFile.Path = filepath.Join(curBundleFile.Path, pathPiece)
+				}
+			}
+			_, err := os.Stat(curBundleFile.Path)
+			if err != nil {
+				if os.IsNotExist(err) {
 					err := os.MkdirAll(curBundleFile.Path, 0755)
 					if err != nil {
 						return nil, err
 					}
+				} else {
+					return nil, err
 				}
 			}
+			curBundleFile.Path = filepath.Join(curBundleFile.Path, file.Path[len(file.Path)-1])
 			bundle.Files = append(bundle.Files, &curBundleFile)
 		}
-	} else { // Single File mode
+		bundle.Length = curByte
+
+	} else {
 		bundle.MultiFile = false
-		bundleFile := &BundleFile{ByteStart: 0, Length: metaData.Info.Length, Path: fmt.Sprintf("./%s/%s", bundle.Path, metaData.Info.Name)}
-		bundle.Files = []*BundleFile{bundleFile}
-		totalLength = metaData.Info.Length
+		bundle.Files = []*BundleFile{{
+			Path:      filepath.Join(bundle.Path, metaData.Info.Name),
+			Length:    metaData.Info.Length,
+			ByteStart: 0,
+		}}
+		bundle.Length = metaData.Info.Length
 	}
-	bundle.Length = totalLength
-	msg := "Got files...\n"
-	for _, file := range bundle.Files {
-		msg += fmt.Sprintf("Path: %s, Length: %d\n", file.Path, file.Length)
-	}
-	bundle.logger.Debug(msg)
-	if metaData.Info.PieceLength == 0 {
-		return nil, errors.New("no piece length")
-	}
-	// Pieces
-	if len(metaData.Info.Pieces) == 0 {
-		return nil, errors.New("no pieces")
-	}
+
 	curByte := int64(0)
-	bundle.PieceLength = metaData.Info.PieceLength
 	for _, pieceHash := range metaData.Info.Pieces {
 		curPieceLength := bundle.PieceLength
-		if curByte+bundle.PieceLength > totalLength {
-			curPieceLength = totalLength - curByte
+		if curByte+bundle.PieceLength > bundle.Length {
+			curPieceLength = bundle.Length - curByte
 		}
 		curPiece := NewPiece(curPieceLength, curByte, pieceHash)
 		bundle.Pieces = append(bundle.Pieces, curPiece)
 		curByte += curPieceLength
 	}
 	bundle.NumPieces = int64(len(bundle.Pieces))
-	bundle.logger.Debug(fmt.Sprintf("Got pieces (%d)\n", bundle.NumPieces))
 
-	// bitfield
+	bundle.Bitfield = bitfield.New(bundle.NumPieces)
 
-	bundle.Bitfield = bf
-
-	// Write files
-
+	foundFiles := false
 	for _, bundleFile := range bundle.Files {
-		if !checkFile(bundleFile.Path, bundleFile.Length) {
-			bundle.logger.Debug(fmt.Sprintf("Creating file: %s (%d Bytes)\n", bundleFile.Path, bundleFile.Length))
-			file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0755)
-			if err != nil {
-				return nil, err
-			}
-			defer file.Close()
-
-			for i := int64(0); i < bundleFile.Length; i++ {
-				_, err = file.Write([]byte{0})
+		if info, err := os.Stat(bundleFile.Path); err != nil || info.Size() != bundleFile.Length {
+			if os.IsNotExist(err) || info.Size() != bundleFile.Length {
+				// Write file
+				bundle.logger.Debug(fmt.Sprintf("Creating file: %s (%d Bytes)", bundleFile.Path, bundleFile.Length))
+				file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0755)
 				if err != nil {
 					return nil, err
 				}
+				defer file.Close()
+				for i := int64(0); i < bundleFile.Length; i++ {
+					_, err = file.Write([]byte{0})
+					if err != nil {
+						return nil, err
+					}
+				}
+			} else {
+				return nil, err
 			}
+		} else {
+			foundFiles = true
 		}
 	}
+	if foundFiles {
+		err := bundle.Recheck()
+		if err != nil {
+			bundle.logger.Debug(fmt.Sprintf("Recheck failed: %v", err))
+		}
+	}
+	return &bundle, nil
+}
+
+// Load files; fail if doesn't exist or lengths are wrong
+func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath string) (*Bundle, error) {
+	bundle := Bundle{
+		Name:        metaData.Info.Name,
+		PieceLength: metaData.Info.PieceLength,
+		Complete:    false,
+		Path:        bundlePath,
+		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
+		InfoHash:    metaData.InfoHash,
+		logger:      logger.New("WARN", "Bundle"),
+	}
+
+	if _, err := os.Stat(bundle.Path); err != nil {
+		return nil, err
+	}
+	// Files
+	if metaData.Info.Length == 0 {
+		bundle.MultiFile = true
+		curByte := int64(0)
+		bundle.Files = make([]*BundleFile, 0)
+		for _, file := range metaData.Info.Files {
+			curBundleFile := BundleFile{
+				Path:      bundle.Path,
+				Length:    file.Length,
+				ByteStart: curByte,
+			}
+			curByte += file.Length
+			for _, pathPiece := range file.Path {
+				curBundleFile.Path = filepath.Join(curBundleFile.Path, pathPiece)
+			}
+			_, err := os.Stat(curBundleFile.Path)
+			if err != nil {
+				return nil, err
+			}
+			bundle.Files = append(bundle.Files, &curBundleFile)
+		}
+		bundle.Length = curByte
+	} else {
+		bundle.MultiFile = false
+		bundle.Files = []*BundleFile{{
+			Path:      filepath.Join(bundle.Path, metaData.Info.Name),
+			Length:    metaData.Info.Length,
+			ByteStart: 0,
+		}}
+		if _, err := os.Stat(bundle.Files[0].Path); err != nil {
+			return nil, err
+		}
+		bundle.Length = metaData.Info.Length
+	}
+
+	curByte := int64(0)
+	for _, pieceHash := range metaData.Info.Pieces {
+		curPieceLength := bundle.PieceLength
+		if curByte+bundle.PieceLength > bundle.Length {
+			curPieceLength = bundle.Length - curByte
+		}
+		curPiece := NewPiece(curPieceLength, curByte, pieceHash)
+		bundle.Pieces = append(bundle.Pieces, curPiece)
+		curByte += curPieceLength
+	}
+	bundle.NumPieces = int64(len(bundle.Pieces))
+
+	bundle.Bitfield = bf
+
 	return &bundle, nil
 }
 

@@ -164,6 +164,7 @@ func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 		tf.Info.Length = length
 		tf.Info.MultiFile = false
 	} else {
+		tf.Info.Length = 0
 		files, ok := infoDict["files"].([]interface{})
 		if !ok {
 			return errors.New("no files or length")

@@ -74,7 +74,7 @@ func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 		panic(err)
 	}
 	fmt.Println("Torrentfile succesfully parsed")
-	bdl, err := bundle.NewBundle(tf, bitfield.New(int64(len(tf.Info.Pieces))), "./TestBundle", 20)
+	bdl, err := bundle.Create(tf, "./TestBundle")
 	if err != nil {
 		panic(err)
 	}
@@ -127,7 +127,7 @@ func TestPeer(tfPath string, myPeerID string) {
 		panic(err)
 	}
 	fmt.Println("Torrentfile succesfully parsed")
-	bdl, err := bundle.NewBundle(tf, bitfield.New(int64(len(tf.Info.Pieces))), "./TestBundle", 20)
+	bdl, err := bundle.Create(tf, "./TestBundle")
 	if err != nil {
 		panic(err)
 	}

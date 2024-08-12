@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -88,7 +89,15 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 
 		logger: logger.New("DEBUG", "Session"),
 	}
-	bnd, err := bundle.NewBundle(tf, bf, path, 20)
+	var bnd *bundle.Bundle
+	bnd, err := bundle.Load(tf, bf, path)
+	if os.IsNotExist(err) {
+		bnd, err = bundle.Create(tf, path)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}

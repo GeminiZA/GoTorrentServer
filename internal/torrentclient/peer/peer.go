@@ -52,10 +52,10 @@ func (bra *blockRequest) Equal(brb *blockRequest) bool {
 
 type Peer struct {
 	// Info
-	RemotePeerID   string
+	RemotePeerID   []byte
 	RemoteIP       string
 	RemotePort     int
-	peerID         string
+	peerID         []byte
 	infoHash       []byte
 	bitField       *bitfield.Bitfield
 	remoteBitfield *bitfield.Bitfield
@@ -96,17 +96,16 @@ type Peer struct {
 }
 
 func Connect(
-	remotePeerID string,
 	remoteIP string,
 	remotePort int,
 	infohash []byte,
-	peerID string,
+	peerID []byte,
 	myBitfield *bitfield.Bitfield,
 	numPieces int64,
 ) (*Peer, error) {
 	peer := Peer{
 		peerID:           peerID,
-		RemotePeerID:     remotePeerID,
+		RemotePeerID:     nil,
 		RemoteIP:         remoteIP,
 		RemotePort:       remotePort,
 		infoHash:         infohash,

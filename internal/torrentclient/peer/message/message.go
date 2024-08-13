@@ -36,7 +36,7 @@ type Message struct {
 	Begin    uint32
 	Piece    []byte
 	Port     uint32
-	PeerID   string
+	PeerID   []byte
 	InfoHash []byte
 	Reserved []byte
 }
@@ -154,7 +154,7 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 	}
 	msg.Reserved = bytes[20:28]
 	msg.InfoHash = bytes[28:48]
-	msg.PeerID = string(bytes[48:68])
+	msg.PeerID = bytes[48:68]
 	return &msg, nil
 }
 
@@ -243,7 +243,7 @@ func (msg *Message) Print() string {
 	return ret
 }
 
-func NewHandshake(infoHash []byte, peerID string) *Message {
+func NewHandshake(infoHash []byte, peerID []byte) *Message {
 	msg := Message{Type: HANDSHAKE}
 	msg.InfoHash = infoHash
 	msg.PeerID = peerID

@@ -20,7 +20,7 @@ import (
 
 const (
 	ListenPort uint16 = 6881
-	PeerID     string = "-TR2940-6oFw2M6BdUkY"
+	PeerIDStr  string = "-TR2940-6oFw2M6BdUkY"
 )
 
 type TorrentClient struct {
@@ -80,7 +80,7 @@ func Start() (*TorrentClient, error) {
 			tf,
 			bf,
 			ListenPort,
-			PeerID,
+			[]byte(PeerIDStr),
 		)
 		if err != nil {
 			client.logger.Error(fmt.Sprintf("failed to create session for infohash: %x: %v", hash, err))
@@ -126,7 +126,7 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 	if err != nil {
 		return err
 	}
-	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, PeerID)
+	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
 	if err != nil {
 		return err
 	}

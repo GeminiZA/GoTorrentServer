@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,7 @@ type Session struct {
 	ConnectingPeers  []*tracker.PeerInfo
 
 	listenPort uint16
-	peerID     string
+	peerID     []byte
 	maxPeers   int
 
 	downloadRateKB float64
@@ -55,8 +56,8 @@ type Session struct {
 type blockRequest struct {
 	Info     bundle.BlockInfo
 	Sent     bool
-	Rejected []string
-	SentToID string
+	Rejected [][]byte
+	SentToID []byte
 }
 
 func (bra *blockRequest) Equal(brb *blockRequest) bool {
@@ -67,7 +68,7 @@ func (bra *blockRequest) Equal(brb *blockRequest) bool {
 
 // Exported
 
-func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listenPort uint16, peerID string) (*Session, error) {
+func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listenPort uint16, peerID []byte) (*Session, error) {
 	session := Session{
 		Peers:                   make([]*peer.Peer, 0, 20),
 		Path:                    path,
@@ -288,7 +289,7 @@ func (session *Session) getBlocksFromBundle() {
 		for _, block := range blocksToRequest {
 			newReq := &blockRequest{
 				Info:     *block,
-				Rejected: make([]string, 0, 20),
+				Rejected: make([][]byte, 0, 20),
 				Sent:     false,
 			}
 			requestsToAdd = append(requestsToAdd, newReq)
@@ -389,7 +390,7 @@ func (session *Session) checkCancelled() {
 						req.Info.Length == session.BlockQueue[i].Info.Length {
 						session.BlockQueue[i].Rejected = append(session.BlockQueue[i].Rejected, curPeer.RemotePeerID)
 						session.BlockQueue[i].Sent = false
-						session.BlockQueue[i].SentToID = ""
+						session.BlockQueue[i].SentToID = make([]byte, 0)
 						break
 					}
 					i++
@@ -433,7 +434,7 @@ func (session *Session) assignParts() {
 					}
 					rejected := false
 					for _, rej := range curBlockReq.Rejected {
-						if rej == curPeer.RemotePeerID {
+						if bytes.Equal(rej, curPeer.RemotePeerID) {
 							rejected = true
 							break
 						}
@@ -446,7 +447,7 @@ func (session *Session) assignParts() {
 						numAdded++
 					}
 					if rejected && peerIndex == len(session.Peers) {
-						session.BlockQueue[curRequestIndex].Rejected = make([]string, 0, 20)
+						session.BlockQueue[curRequestIndex].Rejected = make([][]byte, 0, 20)
 					}
 					curRequestIndex++
 				}
@@ -523,7 +524,6 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 		}
 	}
 	peer, err := peer.Connect(
-		"",
 		pi.IP,
 		pi.Port,
 		session.Bundle.InfoHash,
@@ -538,14 +538,14 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 	return nil
 }
 
-func (session *Session) disconnectPeer(peerID string) error {
+func (session *Session) disconnectPeer(peerID []byte) error {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
 	var peer *peer.Peer
 	var peerIndex int
 	for i, curPeer := range session.Peers {
-		if curPeer.RemotePeerID == peerID {
+		if bytes.Equal(curPeer.RemotePeerID, peerID) {
 			peer = curPeer
 			peerIndex = i
 		}
@@ -555,9 +555,9 @@ func (session *Session) disconnectPeer(peerID string) error {
 	}
 	peer.Close()
 	for i := range session.BlockQueue {
-		if session.BlockQueue[i].Sent && session.BlockQueue[i].SentToID == peerID {
+		if session.BlockQueue[i].Sent && bytes.Equal(session.BlockQueue[i].SentToID, peerID) {
 			session.BlockQueue[i].Sent = false
-			session.BlockQueue[i].SentToID = ""
+			session.BlockQueue[i].SentToID = make([]byte, 0)
 		}
 	}
 	session.Peers = append(session.Peers[:peerIndex], session.Peers[peerIndex+1:]...)

@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/GeminiZA/GoTorrentServer/internal/logger"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
 )
 
 // use STUN to get public IP and Port
@@ -24,18 +27,28 @@ type ListenServer struct {
 	initialized    bool
 	running        bool
 	stopped        bool
-	connChan       chan<- net.Conn
+	peerChan       chan<- *IncomingPeer
+
+	logger *logger.Logger
 }
 
-func New(internalPort uint16, connChan chan<- net.Conn, externalPort uint16, externalIP string) (*ListenServer, error) {
+type IncomingPeer struct {
+	PeerID      []byte
+	InfoHash    []byte
+	ConnectTime time.Time
+	Conn        net.Conn
+}
+
+func New(internalPort uint16, externalPort uint16, externalIP string) (*ListenServer, error) {
 	lp := ListenServer{
 		internalPort: internalPort,
 		initialized:  true,
 		running:      false,
 		stopped:      true,
-		connChan:     connChan,
 		externalPort: externalPort,
 		externalIP:   externalIP,
+		peerChan:     make(chan<- *IncomingPeer, 20),
+		logger:       logger.New("DEBUG", "ListenServer"),
 	}
 	return &lp, nil
 }
@@ -45,7 +58,7 @@ func (ls *ListenServer) listen() {
 	// 	ls.initializeNAT()
 	// }
 	fmt.Printf("listenport started on port: %d\n", ls.internalPort)
-	listen, err := net.Listen("tcp", fmt.Sprintf("%d", ls.externalPort))
+	listen, err := net.Listen("tcp", fmt.Sprintf("%d", ls.internalPort))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -71,10 +84,35 @@ func (ls *ListenServer) initializeNAT() error {
 }
 
 func (ls *ListenServer) handleConn(conn net.Conn) {
-	ls.connChan <- conn
+	const HANDSHAKE_TIMEOUT_MS = 5000
+	conn.SetReadDeadline(time.Now().Add(HANDSHAKE_TIMEOUT_MS * time.Millisecond))
+	handshakeBytes := make([]byte, 68)
+	n, err := conn.Read(handshakeBytes)
+	if err != nil {
+		ls.logger.Error(fmt.Sprintf("error reading handshake from incoming peer: %v", err))
+		return
+	}
+	if n != 68 {
+		ls.logger.Error("error reading handshake from incoming peer: invalid handshake length")
+	}
+	ls.logger.Debug(fmt.Sprintf("Read handshake bytes from peer: %x\n", handshakeBytes))
+	handshakeMsg, err := message.ParseHandshake(handshakeBytes)
+	if err != nil {
+		ls.logger.Error(fmt.Sprintf("error reading handshake from incoming peer: %v", err))
+		return
+	}
+
+	ls.logger.Debug(fmt.Sprintf("Handshake successfully read from peer(%s)...\n", conn.RemoteAddr().String()))
+	newPeer := IncomingPeer{
+		PeerID:      handshakeMsg.PeerID,
+		InfoHash:    handshakeMsg.InfoHash,
+		ConnectTime: time.Now(),
+		Conn:        conn,
+	}
+	ls.peerChan <- &newPeer
 }
 
-func (ls *ListenServer) Start(errCh chan<- error) error {
+func (ls *ListenServer) Start() error {
 	if !ls.initialized {
 		return errors.New("listen port not correctly initialized")
 	}

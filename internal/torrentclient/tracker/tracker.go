@@ -35,7 +35,7 @@ type Tracker struct {
 	uploaded           int64
 	left               int64
 	complete           bool
-	PeerID             string
+	PeerID             []byte
 	Interval           time.Duration
 	MinInterval        time.Duration
 	Seeders            int64
@@ -57,7 +57,7 @@ type Tracker struct {
 	logger               *logger.Logger
 }
 
-func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded int64, left int64, peerId string) *Tracker {
+func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded int64, left int64, peerId []byte) *Tracker {
 	return &Tracker{
 		InfoHash:           infoHash,
 		announceErrorCount: 0,
@@ -199,7 +199,7 @@ func (tracker *Tracker) announce(event int) error {
 
 	params := url.Values{}
 	params.Add("info_hash", string(tracker.InfoHash))
-	params.Add("peer_id", tracker.PeerID)
+	params.Add("peer_id", string(tracker.PeerID))
 	params.Add("port", fmt.Sprintf("%d", tracker.Port))
 	params.Add("uploaded", strconv.FormatInt(tracker.uploaded, 10))
 	params.Add("downloaded", strconv.FormatInt(tracker.downloaded, 10))

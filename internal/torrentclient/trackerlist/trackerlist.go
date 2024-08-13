@@ -19,7 +19,7 @@ type TrackerList struct {
 	uploaded     int64
 	left         int64
 	complete     bool
-	peerID       string
+	peerID       []byte
 	Seeders      int
 	Leechers     int
 	Peers        []*tracker.PeerInfo
@@ -36,7 +36,7 @@ func New(
 	listenPort uint16,
 	left int64,
 	complete bool,
-	peerID string,
+	peerID []byte,
 ) *TrackerList {
 	var newAnnounceList [][]string
 	if announce != "" {

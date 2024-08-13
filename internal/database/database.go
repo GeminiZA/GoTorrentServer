@@ -88,6 +88,22 @@ func (dbc *DBConn) GetAllInfoHashes() ([][]byte, error) {
 	return infoHashes, nil
 }
 
+func (dbc *DBConn) RemoveTorrent(infoHash []byte) error {
+	dbc.mux.Lock()
+	defer dbc.mux.Unlock()
+
+	const query = `
+    DELETE FROM torrents WHERE info_hash = ?
+    `
+
+	_, err := dbc.db.Exec(query, infoHash)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (dbc *DBConn) GetTorrentFile(infoHash []byte) (string, error) {
 	dbc.mux.Lock()
 	defer dbc.mux.Unlock()

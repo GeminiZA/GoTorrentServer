@@ -232,13 +232,9 @@ func checkFile(path string, length int64) bool {
 }
 
 func (bundle *Bundle) DeleteFiles() error {
-	if bundle.MultiFile {
-		for _, fileInfo := range bundle.Files {
-			err := os.Remove(fileInfo.Path)
-			if err != nil {
-				bundle.logger.Error(fmt.Sprintf("Error deleting file (%s): %v\n", fileInfo.Path, err))
-			}
-		}
+	err := os.RemoveAll(bundle.Path)
+	if err != nil {
+		return err
 	}
 	return nil
 }

@@ -48,6 +48,7 @@ type Session struct {
 	BlockQueueMax int
 
 	running bool
+	Error   error
 	mux     sync.Mutex
 
 	logger *logger.Logger
@@ -95,12 +96,8 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 	if os.IsNotExist(err) {
 		bnd, err = bundle.Create(tf, path)
 		if err != nil {
-			return nil, err
+			session.Error = err
 		}
-	}
-
-	if err != nil {
-		return nil, err
 	}
 	session.Bundle = bnd
 	session.trackerList = trackerlist.New(
@@ -116,7 +113,15 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 }
 
 func (session *Session) Start() error {
+	if session.Error != nil {
+		return fmt.Errorf("cannot start session in error state: %v", session.Error)
+	}
 	session.running = true
+
+	err := session.trackerList.Start()
+	if err != nil {
+		return err
+	}
 
 	go session.run()
 
@@ -174,10 +179,6 @@ func (session *Session) Recheck() error {
 // Internal
 
 func (session *Session) run() {
-	err := session.trackerList.Start()
-	if err != nil {
-		session.logger.Error(fmt.Sprintf("Error starting trackers: %v\n", err))
-	}
 	for session.running {
 		if session.Bundle.Complete { // Seeding
 			return

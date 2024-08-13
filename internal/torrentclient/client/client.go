@@ -180,6 +180,87 @@ func (client *TorrentClient) StopTorrent(infoHash []byte) error {
 	return errors.New("session for infoHash not found")
 }
 
+func (client *TorrentClient) RecheckTorrent(infoHash []byte) error {
+	if len(infoHash) != 20 {
+		return errors.New("invalid InfoHash")
+	}
+	err := client.dbc.UpdateTorrentStatus(infoHash, 0)
+	if err != nil {
+		return err
+	}
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
+			sesh.Recheck()
+			return nil
+		}
+	}
+	return errors.New("session for infoHash not found")
+}
+
+func (client *TorrentClient) SetTorrentDownloadLimitKB(infoHash []byte, rateKB float64) error {
+	if len(infoHash) != 20 {
+		return errors.New("invalid InfoHash")
+	}
+	err := client.dbc.UpdateDownloadRate(infoHash, rateKB)
+	if err != nil {
+		return err
+	}
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
+			sesh.SetMaxDownloadRate(rateKB)
+			return nil
+		}
+	}
+	return errors.New("session for infoHash not found")
+}
+
+func (client *TorrentClient) SetTorrentUploadLimitKB(infoHash []byte, rateKB float64) error {
+	if len(infoHash) != 20 {
+		return errors.New("invalid InfoHash")
+	}
+	err := client.dbc.UpdateUploadRate(infoHash, rateKB)
+	if err != nil {
+		return err
+	}
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
+			sesh.SetMaxUploadRate(rateKB)
+			return nil
+		}
+	}
+	return errors.New("session for infoHash not found")
+}
+
+func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
+	if len(infoHash) != 20 {
+		return errors.New("invalid InfoHash")
+	}
+	err := client.dbc.RemoveTorrent(infoHash)
+	if err != nil {
+		return err
+	}
+	seshIndex := -1
+	for index, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
+			sesh.Stop()
+			if delete {
+				err := sesh.Bundle.DeleteFiles()
+				if err != nil {
+					return err
+				}
+			}
+			seshIndex = index
+			break
+		}
+	}
+	if seshIndex != -1 {
+		client.sessions = append(client.sessions[:seshIndex], client.sessions[seshIndex+1:]...)
+		return nil
+	} else {
+		return errors.New("session for infoHash not found")
+	}
+}
+
 func (client *TorrentClient) runClient() {
 	for client.running {
 		client.updateDatabase()

@@ -132,15 +132,23 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 				}
 				defer file.Close()
 				curByte := int64(0)
+				emptyMB := make([]byte, 1024*1024)
+				for i := range emptyMB {
+					emptyMB[i] = 0
+				}
 				for curByte + 1024*1024 < bundleFile.Length {
-					_, err = file.Write([]byte{0})
+					_, err = file.Write(emptyMB)
 					if err != nil {
 						return nil, err
 					}
 					curByte += 1024 * 1024
 				}
+				emptyKB := make([]byte, 1024)
+				for i := range emptyKB {
+					emptyKB[i] = 0
+				}
 				for curByte + 1024 < bundleFile.Length {
-					_, err = file.Write([]byte{0})
+					_, err = file.Write(emptyKB)
 					if err != nil {
 						return nil, err
 					}

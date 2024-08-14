@@ -76,7 +76,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 			}
 			curByte += file.Length
 			for index, pathPiece := range file.Path {
-				if index != len(file.Path) {
+				if index != len(file.Path) - 1 {
 					curBundleFile.Path = filepath.Join(curBundleFile.Path, pathPiece)
 				}
 			}
@@ -131,11 +131,27 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 					return nil, err
 				}
 				defer file.Close()
-				for i := int64(0); i < bundleFile.Length; i++ {
+				curByte := int64(0)
+				for curByte + 1024*1024 < bundleFile.Length {
 					_, err = file.Write([]byte{0})
 					if err != nil {
 						return nil, err
 					}
+					curByte += 1024 * 1024
+				}
+				for curByte + 1024 < bundleFile.Length {
+					_, err = file.Write([]byte{0})
+					if err != nil {
+						return nil, err
+					}
+					curByte += 1024
+				}
+				for curByte + 1 < bundleFile.Length {
+					_, err = file.Write([]byte{0})
+					if err != nil {
+						return nil, err
+					}
+					curByte += 1024
 				}
 			} else {
 				return nil, err

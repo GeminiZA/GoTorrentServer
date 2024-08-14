@@ -24,7 +24,7 @@ func main() {
 		arg := os.Args[2]
 		if arg == "test" {
 			logger := log.Default()
-			myPeerID := "-TR2940-6oFw2M6BdUkY"
+			myPeerID := []byte("-TR2940-6oFw2M6BdUkY")
 			if len(os.Args) < 4 {
 				panic("no package to test specified")
 			}
@@ -67,7 +67,7 @@ func TestClient(tfPath string) {
 	time.Sleep(5 * time.Second)
 }
 
-func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
+func TestTrackerList(tfPath string, myPeerID []byte, logger *log.Logger) {
 	tf := torrentfile.New()
 	err := tf.ParseFile(tfPath)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestTrackerList(tfPath string, myPeerID string, logger *log.Logger) {
 	tl.Stop()
 }
 
-func TestSession(tfPath string, myPeerID string) {
+func TestSession(tfPath string, myPeerID []byte) {
 	tf := torrentfile.New()
 	err := tf.ParseFile(tfPath)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestSession(tfPath string, myPeerID string) {
 	defer sesh.Stop()
 }
 
-func TestPeer(tfPath string, myPeerID string) {
+func TestPeer(tfPath string, myPeerID []byte) {
 	fmt.Println("Starting peer test...")
 	// Connect to a peer
 	tf := torrentfile.New()
@@ -147,7 +147,6 @@ func TestPeer(tfPath string, myPeerID string) {
 	for _, peerDetails := range peers {
 		fmt.Printf("Trying to connect to peer(%s)...\n", peerDetails.IP)
 		curPeer, err = peer.Connect(
-			"",
 			peerDetails.IP,
 			peerDetails.Port,
 			bdl.InfoHash,

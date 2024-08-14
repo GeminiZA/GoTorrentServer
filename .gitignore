@@ -1,5 +1,5 @@
 *.db
 *.meta
 *.log
-test_folder
-TestBundle
+./test_folder
+./TestBundle

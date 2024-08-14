@@ -85,8 +85,8 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		maxPeers:                10,
 		downloadRateKB:          0,
 		uploadRateKB:            0,
-		BlockQueue:              make([]*blockRequest, 0, 50),
-		BlockQueueMax:           50,
+		BlockQueue:              make([]*blockRequest, 0, 256),
+		BlockQueueMax:           256,
 		running:                 false,
 
 		logger: logger.New("DEBUG", "Session"),

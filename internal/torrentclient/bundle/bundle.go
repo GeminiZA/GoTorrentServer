@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/logger"
@@ -120,6 +121,25 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 
 	bundle.Bitfield = bitfield.New(bundle.NumPieces)
 
+	foundFiles, err := bundle.writeFiles()
+	if err != nil {
+		deleteErr := bundle.DeleteFiles()
+		if deleteErr != nil {
+			bundle.logger.Error(fmt.Sprintf("Error deleting file: %v", deleteErr))
+		}
+		return nil, err
+	}
+	if foundFiles {
+		err := bundle.Recheck()
+		if err != nil {
+			bundle.logger.Debug(fmt.Sprintf("Recheck failed: %v", err))
+		}
+	}
+	return &bundle, nil
+}
+
+
+func (bundle *Bundle) writeFiles() (bool, error) {
 	foundFiles := false
 	for _, bundleFile := range bundle.Files {
 		if info, err := os.Stat(bundleFile.Path); err != nil || info.Size() != bundleFile.Length {
@@ -128,7 +148,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 				bundle.logger.Debug(fmt.Sprintf("Creating file: %s (%d Bytes)", bundleFile.Path, bundleFile.Length))
 				file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY|os.O_CREATE, 0755)
 				if err != nil {
-					return nil, err
+					return false, err
 				}
 				defer file.Close()
 				curByte := int64(0)
@@ -139,7 +159,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 				for curByte + 1024*1024 < bundleFile.Length {
 					_, err = file.Write(emptyMB)
 					if err != nil {
-						return nil, err
+						return false, err
 					}
 					curByte += 1024 * 1024
 				}
@@ -150,31 +170,26 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 				for curByte + 1024 < bundleFile.Length {
 					_, err = file.Write(emptyKB)
 					if err != nil {
-						return nil, err
+						return false, err
 					}
 					curByte += 1024
 				}
 				for curByte + 1 < bundleFile.Length {
 					_, err = file.Write([]byte{0})
 					if err != nil {
-						return nil, err
+						return false, err
 					}
 					curByte += 1024
 				}
 			} else {
-				return nil, err
+				return false, err
 			}
 		} else {
 			foundFiles = true
 		}
 	}
-	if foundFiles {
-		err := bundle.Recheck()
-		if err != nil {
-			bundle.logger.Debug(fmt.Sprintf("Recheck failed: %v", err))
-		}
-	}
-	return &bundle, nil
+
+	return foundFiles, nil
 }
 
 // Load files; fail if doesn't exist or lengths are wrong
@@ -244,17 +259,6 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 	return &bundle, nil
 }
 
-func checkFile(path string, length int64) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if info.Size() != length {
-		return false
-	}
-	return true
-}
-
 func (bundle *Bundle) DeleteFiles() error {
 	err := os.RemoveAll(bundle.Path)
 	if err != nil {
@@ -289,6 +293,7 @@ func (bundle *Bundle) WriteBlock(pieceIndex int64, beginOffset int64, block []by
 }
 
 func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only called after mux lock so
+	timeStartWrite := time.Now()
 	piece := bundle.Pieces[pieceIndex]
 	bytes := piece.GetBytes()
 	if !bundle.MultiFile {
@@ -328,6 +333,8 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only c
 			pieceByteWriteStartOffset = pieceByteWriteEndOffset // start next write at current end
 		} // end iterating through files
 	}
+	timeWrite := time.Now().Sub(timeStartWrite)
+	bundle.logger.Debug(fmt.Sprintf("Wrote piece %d (size: %d KiB); Time: %s", pieceIndex, bundle.Pieces[pieceIndex].length, timeWrite))
 	return nil
 }
 

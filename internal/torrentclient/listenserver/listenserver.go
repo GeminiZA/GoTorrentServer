@@ -48,7 +48,7 @@ func New(internalPort uint16, externalPort uint16, externalIP string) (*ListenSe
 		externalPort: externalPort,
 		externalIP:   externalIP,
 		PeerChan:     make(chan *IncomingPeer, 20),
-		logger:       logger.New("DEBUG", "ListenServer"),
+		logger:       logger.New(logger.DEBUG, "ListenServer"),
 	}
 	return &lp, nil
 }

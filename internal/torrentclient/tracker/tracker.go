@@ -81,7 +81,7 @@ func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded in
 		connectionIDRecvTime: time.Time{},
 		timeoutStep:          0,
 
-		logger: logger.New("DEBUG", "Tracker"),
+		logger: logger.New(logger.DEBUG, "Tracker"),
 	}
 }
 

@@ -54,7 +54,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 		Path:        bundlePath,
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
-		logger:      logger.New("WARN", "Bundle"),
+		logger:      logger.New(logger.WARN, "Bundle"),
 	}
 	// Check existence
 	// Create bundle Path
@@ -77,7 +77,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 			}
 			curByte += file.Length
 			for index, pathPiece := range file.Path {
-				if index != len(file.Path) - 1 {
+				if index != len(file.Path)-1 {
 					curBundleFile.Path = filepath.Join(curBundleFile.Path, pathPiece)
 				}
 			}
@@ -138,7 +138,6 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 	return &bundle, nil
 }
 
-
 func (bundle *Bundle) writeFiles() (bool, error) {
 	foundFiles := false
 	for _, bundleFile := range bundle.Files {
@@ -156,7 +155,7 @@ func (bundle *Bundle) writeFiles() (bool, error) {
 				for i := range emptyMB {
 					emptyMB[i] = 0
 				}
-				for curByte + 1024*1024 < bundleFile.Length {
+				for curByte+1024*1024 < bundleFile.Length {
 					_, err = file.Write(emptyMB)
 					if err != nil {
 						return false, err
@@ -167,14 +166,14 @@ func (bundle *Bundle) writeFiles() (bool, error) {
 				for i := range emptyKB {
 					emptyKB[i] = 0
 				}
-				for curByte + 1024 < bundleFile.Length {
+				for curByte+1024 < bundleFile.Length {
 					_, err = file.Write(emptyKB)
 					if err != nil {
 						return false, err
 					}
 					curByte += 1024
 				}
-				for curByte + 1 < bundleFile.Length {
+				for curByte+1 < bundleFile.Length {
 					_, err = file.Write([]byte{0})
 					if err != nil {
 						return false, err
@@ -201,7 +200,7 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 		Path:        bundlePath,
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
-		logger:      logger.New("WARN", "Bundle"),
+		logger:      logger.New(logger.WARN, "Bundle"),
 	}
 
 	if _, err := os.Stat(bundle.Path); err != nil {

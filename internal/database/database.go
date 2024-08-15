@@ -46,7 +46,7 @@ func Connect() (*DBConn, error) {
 	}
 	return &DBConn{
 		db:     db,
-		logger: logger.New("DEBUG", "Database"),
+		logger: logger.New(logger.DEBUG, "Database"),
 	}, nil
 }
 

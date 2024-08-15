@@ -143,7 +143,7 @@ func Add(
 		DownloadRateKB:       0,
 		UploadRateKB:         0,
 
-		logger: logger.New("ERROR", "Peer"),
+		logger: logger.New(logger.ERROR, "Peer"),
 		conn:   conn,
 	}
 
@@ -214,7 +214,7 @@ func Connect(
 		DownloadRateKB:       0,
 		UploadRateKB:         0,
 
-		logger: logger.New("ERROR", "Peer"),
+		logger: logger.New(logger.ERROR, "Peer"),
 	}
 
 	d := net.Dialer{Timeout: time.Millisecond * 2000}

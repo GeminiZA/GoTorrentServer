@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
+	"github.com/GeminiZA/GoTorrentServer/pkg/api"
 )
 
 func main() {
@@ -55,6 +57,33 @@ func main() {
 			// Run server
 		}
 	}
+
+	// else run server
+
+	fmt.Println("Starting server")
+	tc, err := client.Start()
+	if err != nil {
+		panic(err)
+	}
+	defer tc.Stop()
+	handeRequests()
+
+	fmt.Println("Stopped server")
+}
+
+func handeRequests() {
+	http.HandleFunc("/alldata", api.AllData)
+	http.HandleFunc("/torrentdata", api.TorrentData)
+	http.HandleFunc("/addtorrentfile", api.AddTorrentFile)
+	http.HandleFunc("/removetorrent", api.RemoveTorrent)
+	http.HandleFunc("/AddMagnet", api.AddMagnet)
+	http.HandleFunc("/pausetorrent", api.PauseTorrent)
+	http.HandleFunc("/resumetorrent", api.ResumeTorrent)
+	http.HandleFunc("/settorrentdownrate", api.SetTorrentDownRate)
+	http.HandleFunc("/settorrentuprate", api.SetTorrentUpRate)
+	http.HandleFunc("/setglobaldownrate", api.SetGlobalDownRate)
+	http.HandleFunc("/setglobaluprate", api.SetGlobalUpRate)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func TestClient(tfPath string) {

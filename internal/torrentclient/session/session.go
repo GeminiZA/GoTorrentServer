@@ -92,7 +92,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		BlockQueueMax:           256,
 		running:                 false,
 
-		logger: logger.New("DEBUG", "Session"),
+		logger: logger.New(logger.DEBUG, "Session"),
 	}
 	var bnd *bundle.Bundle
 	bnd, err := bundle.Load(tf, bf, path)

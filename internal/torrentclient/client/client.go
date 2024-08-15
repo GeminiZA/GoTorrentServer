@@ -39,7 +39,7 @@ func Start() (*TorrentClient, error) {
 	var err error
 	client := &TorrentClient{
 		sessions: make([]*session.Session, 0),
-		logger:   logger.New("DEBUG", "TorrentClient"),
+		logger:   logger.New(logger.DEBUG, "TorrentClient"),
 		// peerInChan: make(chan<- *peer.Peer, 10),
 	}
 	client.dbc, err = database.Connect()

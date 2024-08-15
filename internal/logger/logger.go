@@ -6,6 +6,13 @@ import (
 	"os"
 )
 
+const (
+	DEBUG = 4
+	INFO  = 3
+	WARN  = 2
+	ERROR = 1
+)
+
 type Logger struct {
 	DebugLogger *log.Logger
 	InfoLogger  *log.Logger
@@ -14,7 +21,7 @@ type Logger struct {
 	LogLevel    byte
 }
 
-func New(LogLevel string, packageStr string) *Logger {
+func New(LogLevel byte, packageStr string) *Logger {
 	flags := log.LstdFlags | log.Lshortfile
 	logger := &Logger{
 		DebugLogger: log.New(os.Stdout, fmt.Sprintf("%s: DEBUG: ", packageStr), flags),
@@ -23,44 +30,36 @@ func New(LogLevel string, packageStr string) *Logger {
 		ErrorLogger: log.New(os.Stdout, fmt.Sprintf("%s: ERROR: ", packageStr), flags),
 	}
 
-	switch LogLevel {
-	case "DEBUG":
-		logger.LogLevel = 4
-	case "INFO":
-		logger.LogLevel = 3
-	case "WARN":
-		logger.LogLevel = 2
-	case "ERROR":
-		logger.LogLevel = 1
-	default:
-		fmt.Printf("Unknown log level: %s; Must be: DEBUG / INFO / WARN / ERROR\n", LogLevel)
-		logger.LogLevel = 4
+	if LogLevel < 1 || LogLevel > 4 {
+		fmt.Printf("Unknown log level: %d; Must be: DEBUG(4) / INFO(3) / WARN(2) / ERROR(1)\n", LogLevel)
+		logger.LogLevel = DEBUG
+	} else {
+		logger.LogLevel = LogLevel
 	}
+	fmt.Printf("Started logger for %s: Level: %d\n", packageStr, logger.LogLevel)
 	return logger
 }
 
 func (lg *Logger) Debug(message string) {
-	if lg.LogLevel <= 4 {
+	if lg.LogLevel >= DEBUG {
 		lg.DebugLogger.Print(message)
 	}
 }
 
 func (lg *Logger) Info(message string) {
-	if lg.LogLevel <= 3 {
+	if lg.LogLevel >= INFO {
 		lg.InfoLogger.Print(message)
 	}
 }
 
 func (lg *Logger) Warn(message string) {
-	if lg.LogLevel <= 2 {
+	if lg.LogLevel >= WARN {
 		lg.WarnLogger.Print(message)
 	}
 }
 
 func (lg *Logger) Error(message string) {
-	if lg.LogLevel <= 1 {
-		lg.ErrorLogger.Print(message)
-	}
+	lg.ErrorLogger.Print(message)
 }
 
 func (lg *Logger) Fatal(message string) {

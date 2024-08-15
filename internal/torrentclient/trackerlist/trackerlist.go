@@ -58,7 +58,7 @@ func New(
 		Peers:        make([]*tracker.PeerInfo, 0),
 		running:      false,
 		Trackers:     make([]*tracker.Tracker, 0),
-		logger:       logger.New("DEBUG", "TrackerList"),
+		logger:       logger.New(logger.DEBUG, "TrackerList"),
 	}
 }
 

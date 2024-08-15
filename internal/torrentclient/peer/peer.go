@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -95,16 +96,91 @@ type Peer struct {
 	logger        *logger.Logger
 }
 
+func Add(
+	conn net.Conn,
+	infohash []byte,
+	myPeerID []byte,
+	myBitfield *bitfield.Bitfield,
+	numPieces int64,
+) (*Peer, error) {
+	peerAddrParts := strings.Split(conn.RemoteAddr().String(), ":")
+	peerPort, err := strconv.Atoi(peerAddrParts[1])
+	if err != nil {
+		return nil, err
+	}
+	peer := Peer{
+		peerID:           myPeerID,
+		RemotePeerID:     nil,
+		RemoteIP:         peerAddrParts[0],
+		RemotePort:       peerPort,
+		infoHash:         infohash,
+		bitField:         myBitfield,
+		remoteBitfield:   bitfield.New(myBitfield.Len()),
+		numPieces:        numPieces,
+		timeLastReceived: time.Now(),
+		timeLastSent:     time.Now(),
+		Connected:        false,
+		Keepalive:        false,
+		AmInterested:     false,
+		AmChoking:        true,
+		RemoteInterested: false,
+		RemoteChoking:    true,
+		// Queues
+		RequestsOutMax:        10,
+		ResponsesOutMax:       10,
+		requestInQueue:        make([]*blockRequest, 0),
+		requestOutQueue:       make([]*blockRequest, 0),
+		responseOutQueue:      make([]*blockResponse, 0),
+		responseInQueue:       make([]*blockResponse, 0),
+		requestCancelledQueue: make([]*blockRequest, 0),
+		// RateKBs
+		lastDownloadUpdate:   time.Now(),
+		lastUploadUpdate:     time.Now(),
+		bytesUploaded:        0,
+		bytesDownloaded:      0,
+		TotalBytesUploaded:   0,
+		TotalBytesDownloaded: 0,
+		DownloadRateKB:       0,
+		UploadRateKB:         0,
+
+		logger: logger.New("ERROR", "Peer"),
+		conn:   conn,
+	}
+
+	err = peer.readHandshake()
+	if err != nil {
+		peer.conn.Close()
+		peer.Connected = false
+		return nil, err
+	}
+
+	if !peer.bitField.Empty {
+		err = peer.sendBitField()
+		if err != nil {
+			peer.logger.Warn(fmt.Sprintf("Error sending bitfield to peer: %v\n", err))
+		}
+	}
+	peer.Keepalive = true
+	peer.Connected = true
+	peer.TimeConnected = time.Now()
+	peer.conn.SetReadDeadline(time.Time{})
+
+	go peer.runIncoming()
+	go peer.runOutgoing()
+
+	return &peer, nil
+}
+
 func Connect(
 	remoteIP string,
 	remotePort int,
 	infohash []byte,
-	peerID []byte,
+	myPeerID []byte,
 	myBitfield *bitfield.Bitfield,
 	numPieces int64,
 ) (*Peer, error) {
 	peer := Peer{
-		peerID:           peerID,
+		peerID:           myPeerID,
 		RemotePeerID:     nil,
 		RemoteIP:         remoteIP,
 		RemotePort:       remotePort,
@@ -223,6 +299,7 @@ func (peer *Peer) SetMaxRequests(newMax int) {
 	defer peer.mux.Unlock()
 
 	peer.RequestsOutMax = newMax
+	peer.logger.Debug(fmt.Sprintf("Peer(%s) Set max requests: %d", peer.RemoteIP, newMax))
 }
 
 func (peer *Peer) NumRequestsCanAdd() int {

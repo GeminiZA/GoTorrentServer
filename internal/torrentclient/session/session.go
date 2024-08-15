@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode"
@@ -13,6 +15,7 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/listenserver"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/tracker"
@@ -181,13 +184,8 @@ func (session *Session) Recheck() error {
 func (session *Session) run() {
 	for session.running {
 		if session.Bundle.Complete { // Seeding
-			return
-			// Check for upload rate
-
-			// Assign Responses
-
-			// Check for new peers connecting
-			//
+			// Assign responses
+			session.checkRequests()
 		} else { // Leeching
 
 			session.sortPeers()
@@ -286,7 +284,7 @@ func (session *Session) getBlocksFromBundle() {
 	if len(session.BlockQueue) < session.BlockQueueMax {
 		space := session.BlockQueueMax - len(session.BlockQueue)
 		blocksToRequest := session.Bundle.NextNBlocks(space)
-		requestsToAdd := make([]*blockRequest, 0, 50)
+		requestsToAdd := make([]*blockRequest, 0, 150)
 		for _, block := range blocksToRequest {
 			newReq := &blockRequest{
 				Info:     *block,
@@ -416,13 +414,15 @@ func (session *Session) assignParts() {
 			if curPeer.RemoteChoking || numCanAdd == 0 {
 				continue
 			}
-			if numCanAdd > (curPeer.RequestsOutMax/2) && curPeer.RequestsOutMax < 256 {
-				curPeer.SetMaxRequests(curPeer.RequestsOutMax * 2)
-			}
 			if session.maxDownloadRateKB != 0 {
 				if numCanAdd > int(numBlocksCanQueue) {
 					numCanAdd = int(numBlocksCanQueue)
 				}
+			}
+			if curPeer.NumRequestsCancelled() < curPeer.RequestsOutMax/4 &&
+				numCanAdd > curPeer.RequestsOutMax/2 &&
+				curPeer.RequestsOutMax < 256 {
+				curPeer.SetMaxRequests(curPeer.RequestsOutMax * 2)
 			}
 			if numCanAdd > 0 {
 				numAdded := 0
@@ -516,6 +516,26 @@ func (session *Session) findNewPeer() {
 			break
 		}
 	}
+}
+
+func (session *Session) AddPeer(incomingPeer *listenserver.IncomingPeer) {
+	if len(session.ConnectedPeers)+len(session.ConnectingPeers) >= session.maxPeers {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): session full", incomingPeer.Conn.RemoteAddr().String()))
+		return
+	}
+	peer, err := peer.Add(incomingPeer.Conn, incomingPeer.InfoHash, session.peerID, session.Bundle.Bitfield, session.Bundle.NumPieces)
+	if err != nil {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
+	}
+	peerAddrParts := strings.Split(incomingPeer.Conn.RemoteAddr().String(), ":")
+	peerPort, err := strconv.Atoi(peerAddrParts[1])
+	if err != nil {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
+	}
+	session.mux.Lock()
+	session.Peers = append(session.Peers, peer)
+	session.ConnectedPeers = append(session.ConnectedPeers, &tracker.PeerInfo{IP: peerAddrParts[0], Port: peerPort})
+	session.mux.Unlock()
 }
 
 func (session *Session) connectPeer(pi *tracker.PeerInfo) error {

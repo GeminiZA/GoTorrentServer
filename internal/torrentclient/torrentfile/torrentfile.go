@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/logger"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
@@ -81,6 +82,8 @@ func New() *TorrentFile {
 
 func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 	var err error
+
+	timeStart := time.Now()
 
 	tf.InfoHash, err = bencode.GetInfoHash(data)
 	tf.logger.Debug(fmt.Sprintf("Got info hash: %s\n", string(tf.InfoHash)))
@@ -194,6 +197,7 @@ func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 			tf.Info.Files = append(tf.Info.Files, FileInfo{Path: pathList, Length: length})
 		}
 	}
+	tf.logger.Debug(fmt.Sprintf("Torrentfile parsed successfully; Time: %s", time.Since(timeStart)))
 	return nil
 }
 

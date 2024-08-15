@@ -27,7 +27,7 @@ type ListenServer struct {
 	initialized    bool
 	running        bool
 	stopped        bool
-	peerChan       chan<- *IncomingPeer
+	PeerChan       chan *IncomingPeer
 
 	logger *logger.Logger
 }
@@ -47,7 +47,7 @@ func New(internalPort uint16, externalPort uint16, externalIP string) (*ListenSe
 		stopped:      true,
 		externalPort: externalPort,
 		externalIP:   externalIP,
-		peerChan:     make(chan<- *IncomingPeer, 20),
+		PeerChan:     make(chan *IncomingPeer, 20),
 		logger:       logger.New("DEBUG", "ListenServer"),
 	}
 	return &lp, nil
@@ -109,7 +109,7 @@ func (ls *ListenServer) handleConn(conn net.Conn) {
 		ConnectTime: time.Now(),
 		Conn:        conn,
 	}
-	ls.peerChan <- &newPeer
+	ls.PeerChan <- &newPeer
 }
 
 func (ls *ListenServer) Start() error {

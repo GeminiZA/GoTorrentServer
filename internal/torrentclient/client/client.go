@@ -262,9 +262,9 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 }
 
 func (client *TorrentClient) runClient() {
+	go client.processIncomingClients()
 	for client.running {
 		client.updateDatabase()
-		client.processIncomingClients()
 		time.Sleep(time.Millisecond * 1000)
 	}
 }
@@ -281,5 +281,18 @@ func (client *TorrentClient) updateDatabase() {
 }
 
 func (client *TorrentClient) processIncomingClients() {
-	// Not implemented
+	for client.running {
+		newPeer := <-client.listenServer.PeerChan
+		found := false
+		for _, session := range client.sessions {
+			if bytes.Equal(session.Bundle.InfoHash, newPeer.InfoHash) {
+				session.AddPeer(newPeer)
+				found = true
+				break
+			}
+		}
+		if !found {
+			client.logger.Error(fmt.Sprintf("Error on Peer(%s) trying to connect: Not serving infohash: %x", newPeer.Conn.RemoteAddr().String(), newPeer.InfoHash))
+		}
+	}
 }

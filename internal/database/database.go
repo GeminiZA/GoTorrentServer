@@ -19,7 +19,6 @@ type DBConn struct {
 	logger *logger.Logger
 }
 
-// info_hash => stored as hex
 // torrent_file => bEncoded dict of the torrent metadata
 // path => path to download target
 // status => 0 (paused) / 1 (running)
@@ -35,7 +34,7 @@ func Connect() (*DBConn, error) {
 		info_hash STRING NOT NULL PRIMARY KEY,
 		torrent_file STRING NOT NULL,
 		path STRING,
-		bitfield_hex STRING NOT NULL,
+		bitfield BLOB NOT NULL,
 		bitfield_length INTEGER NOT NULL,
 		downloadrate_max REAL,
 		uploadrate_max REAL,
@@ -278,21 +277,18 @@ func (dbc *DBConn) GetBitfield(infoHash []byte) (*bitfield.Bitfield, error) {
 	infoHashStr := string(infoHash)
 
 	const query = `
-	SELECT bitfield_hex, bitfield_length
+	SELECT bitfield, bitfield_length
 	FROM torrents
 	WHERE info_hash = ?
 	`
 
 	var bitfieldLength int64
-	var bitfieldHex string
-	err := dbc.db.QueryRow(query, infoHashStr).Scan(&bitfieldHex, &bitfieldLength)
+	var bitfieldBytes []byte
+	err := dbc.db.QueryRow(query, infoHashStr).Scan(&bitfieldBytes, &bitfieldLength)
 	if err != nil {
 		return nil, err
 	}
-	bf, err := bitfield.FromHex(bitfieldHex, bitfieldLength)
-	if err != nil {
-		return nil, err
-	}
+	bf := bitfield.FromBytes(bitfieldBytes, bitfieldLength)
 	dbc.logger.Debug(fmt.Sprintf("Got bitfield for %x", infoHash))
 	return bf, nil
 }
@@ -302,15 +298,15 @@ func (dbc *DBConn) UpdateBitfield(infoHash []byte, bf *bitfield.Bitfield) error 
 	defer dbc.mux.Unlock()
 
 	infoHashStr := string(infoHash)
-	bitfieldHex := bf.ToHex()
+	bitfieldBytes := bf.Bytes
 
 	const query = `
 	UPDATE torrents
-	SET bitfield_hex = ?
+	SET bitfield = ?
 	WHERE info_hash = ?
 	`
 
-	_, err := dbc.db.Exec(query, bitfieldHex, infoHashStr)
+	_, err := dbc.db.Exec(query, bitfieldBytes, infoHashStr)
 	if err != nil {
 		return err
 	}
@@ -328,7 +324,7 @@ func (dbc *DBConn) AddTorrent(tf *torrentfile.TorrentFile, bf *bitfield.Bitfield
 		return err
 	}
 	// path
-	bitfieldHex := bf.ToHex()
+	bitfieldBytes := bf.Bytes
 	bitfieldLength := bf.Len()
 	//dl_max
 	//up_max
@@ -342,7 +338,7 @@ func (dbc *DBConn) AddTorrent(tf *torrentfile.TorrentFile, bf *bitfield.Bitfield
 	}
 
 	const query = `
-    INSERT INTO torrents (info_hash, torrent_file, path, bitfield_hex, bitfield_length, downloadrate_max, uploadrate_max, status)
+    INSERT INTO torrents (info_hash, torrent_file, path, bitfield, bitfield_length, downloadrate_max, uploadrate_max, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `
 
@@ -351,7 +347,7 @@ func (dbc *DBConn) AddTorrent(tf *torrentfile.TorrentFile, bf *bitfield.Bitfield
 		infoHashStr,
 		torrentFileStr,
 		path,
-		bitfieldHex,
+		bitfieldBytes,
 		bitfieldLength,
 		downloadrate_max,
 		uploadrate_max,

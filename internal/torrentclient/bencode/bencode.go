@@ -295,7 +295,6 @@ func bEncodeString(val string) string {
 }
 
 func bEncodeList(list []interface{}) (string, error) {
-	fmt.Printf("Encoding list: %v\n", list)
 	bString := "l"
 	for _, item := range list {
 		switch v := item.(type) {
@@ -349,7 +348,7 @@ func BEncode(dict map[string]interface{}) (string, error) {
 			}
 			bString += dictString
 		default:
-			fmt.Printf("Unknown type of %v: %T\n", value, value)
+			return "", fmt.Errorf("unable to bencode: unknown type of %v: %T", value, value)
 		}
 	}
 	bString += "e"

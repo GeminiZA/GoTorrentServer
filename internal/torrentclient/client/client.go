@@ -319,15 +319,16 @@ type PeerInfo struct {
 }
 
 type SessionInfo struct {
-	Name        string        `json:"name"`
-	InfoHash    string        `json:"infohash"`
-	BitfieldHex string        `json:"bitfieldhex"`
-	TimeStarted string        `json:"time"`
-	Wasted      float64       `json:"wasted"`
-	Downloaded  float64       `json:"downloaded"`
-	Uploaded    float64       `json:"uploaded"`
-	Trackers    []TrackerInfo `json:"trackers"`
-	Error       string        `json:"error"`
+	Name           string        `json:"name"`
+	InfoHash       string        `json:"infohash"`
+	BitfieldB64    string        `json:"bitfield_base64"`
+	BitFieldLenght int           `json:"bitfield_length`
+	TimeStarted    string        `json:"time"`
+	Wasted         float64       `json:"wasted"`
+	Downloaded     float64       `json:"downloaded"`
+	Uploaded       float64       `json:"uploaded"`
+	Trackers       []TrackerInfo `json:"trackers"`
+	Error          string        `json:"error"`
 }
 
 type AllInfo struct {
@@ -342,14 +343,15 @@ func (client *TorrentClient) AllData() ([]byte, error) {
 	}
 	for _, sesh := range client.sessions {
 		newSeshInfo := SessionInfo{
-			Name:        sesh.Bundle.Name,
-			InfoHash:    string(sesh.Bundle.InfoHash),
-			BitfieldHex: sesh.Bundle.Bitfield.ToHex(),
-			Wasted:      0,
-			Downloaded:  sesh.TotalDownloadedKB,
-			Uploaded:    sesh.TotalUploadedKB,
-			Trackers:    make([]TrackerInfo, 0),
-			Error:       fmt.Sprintf("%v", sesh.Error),
+			Name:           sesh.Bundle.Name,
+			InfoHash:       string(sesh.Bundle.InfoHash),
+			BitfieldB64:    sesh.Bundle.Bitfield.ToBase64(),
+			BitFieldLenght: int(sesh.Bundle.Bitfield.Len()),
+			Wasted:         0,
+			Downloaded:     sesh.TotalDownloadedKB,
+			Uploaded:       sesh.TotalUploadedKB,
+			Trackers:       make([]TrackerInfo, 0),
+			Error:          fmt.Sprintf("%v", sesh.Error),
 		}
 		for _, tr := range sesh.TrackerList.Trackers {
 			trerr := tr.TrackerError
@@ -365,6 +367,7 @@ func (client *TorrentClient) AllData() ([]byte, error) {
 				LastAnnounce: tr.LastAnnounce.String(),
 			})
 		}
+		ret.Sessions = append(ret.Sessions, newSeshInfo)
 	}
 	return json.Marshal(ret)
 }

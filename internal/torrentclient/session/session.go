@@ -25,7 +25,7 @@ import (
 type Session struct {
 	Path        string
 	Bundle      *bundle.Bundle
-	trackerList *trackerlist.TrackerList
+	TrackerList *trackerlist.TrackerList
 	tf          *torrentfile.TorrentFile
 
 	maxDownloadRateKB       float64
@@ -44,8 +44,10 @@ type Session struct {
 	peerID     []byte
 	maxPeers   int
 
-	downloadRateKB float64
-	uploadRateKB   float64
+	DownloadRateKB    float64
+	UploadRateKB      float64
+	TotalDownloadedKB float64
+	TotalUploadedKB   float64
 
 	BlockQueue    []*blockRequest
 	BlockQueueMax int
@@ -86,13 +88,13 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		maxRequestsOutRate:      0,
 		maxResponsesOutRate:     0,
 		maxPeers:                10,
-		downloadRateKB:          0,
-		uploadRateKB:            0,
+		DownloadRateKB:          0,
+		UploadRateKB:            0,
 		BlockQueue:              make([]*blockRequest, 0, 256),
 		BlockQueueMax:           256,
 		running:                 false,
 
-		logger: logger.New(logger.DEBUG, "Session"),
+		logger: logger.New(logger.ERROR, "Session"),
 	}
 	var bnd *bundle.Bundle
 	bnd, err := bundle.Load(tf, bf, path)
@@ -103,7 +105,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		}
 	}
 	session.Bundle = bnd
-	session.trackerList = trackerlist.New(
+	session.TrackerList = trackerlist.New(
 		tf.Announce,
 		tf.AnnounceList,
 		bnd.InfoHash,
@@ -121,7 +123,7 @@ func (session *Session) Start() error {
 	}
 	session.running = true
 
-	err := session.trackerList.Start()
+	err := session.TrackerList.Start()
 	if err != nil {
 		return err
 	}
@@ -148,7 +150,7 @@ func (session *Session) Stop() {
 	session.ConnectedPeers = make([]*tracker.PeerInfo, 0, 20)
 	session.ConnectingPeers = make([]*tracker.PeerInfo, 0, 20)
 	session.UnconnectedPeers = make([]*tracker.PeerInfo, 0, 20)
-	session.trackerList.Stop()
+	session.TrackerList.Stop()
 }
 
 func (session *Session) SetMaxDownloadRate(rateKB float64) {
@@ -222,7 +224,7 @@ func (session *Session) run() {
 				go session.findNewPeer()
 			}
 
-			session.logger.Debug(fmt.Sprintf("Rates: Down: %f KB/s Up: %f KB/s\n", session.downloadRateKB, session.uploadRateKB))
+			session.logger.Debug(fmt.Sprintf("Rates: Down: %f KB/s Up: %f KB/s\n", session.DownloadRateKB, session.UploadRateKB))
 
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -242,7 +244,7 @@ func sanitize(s string) string {
 func (session *Session) UpdatePeerInfo() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
-	newPeers := session.trackerList.GetPeers()
+	newPeers := session.TrackerList.GetPeers()
 
 	for _, newPeer := range newPeers {
 		found := false
@@ -301,7 +303,7 @@ func (session *Session) checkRequests() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if session.maxUploadRateKB == 0 || session.uploadRateKB < session.maxUploadRateKB {
+	if session.maxUploadRateKB == 0 || session.UploadRateKB < session.maxUploadRateKB {
 		now := time.Now()
 		added := false
 		timeSinceLastResponsesQueues := now.Sub(session.timeLastResponsesQueued)
@@ -403,7 +405,7 @@ func (session *Session) assignParts() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if session.maxDownloadRateKB == 0 || session.downloadRateKB < session.maxDownloadRateKB {
+	if session.maxDownloadRateKB == 0 || session.DownloadRateKB < session.maxDownloadRateKB {
 		now := time.Now()
 		timeSinceLastRequestsQueued := now.Sub(session.timeLastRequestsQueued)
 		numBlocksCanQueue := int(float64(timeSinceLastRequestsQueued.Milliseconds()/1000) * session.maxRequestsOutRate)
@@ -598,10 +600,12 @@ func (session *Session) calcRates() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	session.downloadRateKB = 0
-	session.uploadRateKB = 0
+	session.DownloadRateKB = 0
+	session.UploadRateKB = 0
 	for _, peer := range session.Peers {
-		session.downloadRateKB += peer.DownloadRateKB
-		session.uploadRateKB += peer.UploadRateKB
+		session.TotalDownloadedKB += float64(peer.TotalBytesDownloaded) / 1024
+		session.TotalUploadedKB += float64(peer.TotalBytesUploaded) / 1024
+		session.DownloadRateKB += peer.DownloadRateKB
+		session.UploadRateKB += peer.UploadRateKB
 	}
 }

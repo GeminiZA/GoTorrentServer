@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/GeminiZA/GoTorrentServer/internal/api"
 	"github.com/GeminiZA/GoTorrentServer/internal/database"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
@@ -15,7 +16,6 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/session"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
-	"github.com/GeminiZA/GoTorrentServer/pkg/api"
 )
 
 func main() {
@@ -66,23 +66,37 @@ func main() {
 		panic(err)
 	}
 	defer tc.Stop()
-	handeRequests()
+	time.Sleep(4 * time.Second)
+	status, err := tc.AllData()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("AllData: %s\n", string(status))
+	time.Sleep(1 * time.Second)
+	tc.AddTorrentFromFile("./test_folder-d984f67af9917b214cd8b6048ab5624c7df6a07a.torrent", "./TestBundle", true)
+	time.Sleep(5 * time.Second)
+	status, err = tc.AllData()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("AllData: %s\n", string(status))
+	// handeRequests(tc)
 
 	fmt.Println("Stopped server")
 }
 
-func handeRequests() {
-	http.HandleFunc("/alldata", api.AllData)
-	http.HandleFunc("/torrentdata", api.TorrentData)
-	http.HandleFunc("/addtorrentfile", api.AddTorrentFile)
-	http.HandleFunc("/removetorrent", api.RemoveTorrent)
-	http.HandleFunc("/AddMagnet", api.AddMagnet)
-	http.HandleFunc("/pausetorrent", api.PauseTorrent)
-	http.HandleFunc("/resumetorrent", api.ResumeTorrent)
-	http.HandleFunc("/settorrentdownrate", api.SetTorrentDownRate)
-	http.HandleFunc("/settorrentuprate", api.SetTorrentUpRate)
-	http.HandleFunc("/setglobaldownrate", api.SetGlobalDownRate)
-	http.HandleFunc("/setglobaluprate", api.SetGlobalUpRate)
+func handeRequests(tc *client.TorrentClient) {
+	http.HandleFunc("/alldata", func(w http.ResponseWriter, r *http.Request) { api.AllData(w, r, tc) })
+	http.HandleFunc("/torrentdata", func(w http.ResponseWriter, r *http.Request) { api.TorrentData(w, r, tc) })
+	http.HandleFunc("/addtorrentfile", func(w http.ResponseWriter, r *http.Request) { api.AddTorrentFile(w, r, tc) })
+	http.HandleFunc("/removetorrent", func(w http.ResponseWriter, r *http.Request) { api.RemoveTorrent(w, r, tc) })
+	http.HandleFunc("/AddMagnet", func(w http.ResponseWriter, r *http.Request) { api.AddMagnet(w, r, tc) })
+	http.HandleFunc("/pausetorrent", func(w http.ResponseWriter, r *http.Request) { api.PauseTorrent(w, r, tc) })
+	http.HandleFunc("/resumetorrent", func(w http.ResponseWriter, r *http.Request) { api.ResumeTorrent(w, r, tc) })
+	http.HandleFunc("/settorrentdownrate", func(w http.ResponseWriter, r *http.Request) { api.SetTorrentDownRate(w, r, tc) })
+	http.HandleFunc("/settorrentuprate", func(w http.ResponseWriter, r *http.Request) { api.SetTorrentUpRate(w, r, tc) })
+	http.HandleFunc("/setglobaldownrate", func(w http.ResponseWriter, r *http.Request) { api.SetGlobalDownRate(w, r, tc) })
+	http.HandleFunc("/setglobaluprate", func(w http.ResponseWriter, r *http.Request) { api.SetGlobalUpRate(w, r, tc) })
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 

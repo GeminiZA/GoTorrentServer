@@ -26,6 +26,7 @@ type TorrentInfo struct {
 }
 
 type TorrentFile struct {
+	dict         map[string]interface{}
 	InfoHash     []byte
 	Announce     string
 	AnnounceList [][]string
@@ -38,40 +39,7 @@ type TorrentFile struct {
 }
 
 func (tf *TorrentFile) Bencode() (string, error) {
-	dict := make(map[string]interface{})
-	dict["announce"] = tf.Announce
-	if len(tf.AnnounceList) > 0 {
-		dict["announce list"] = tf.AnnounceList
-	}
-	dict["creation date"] = tf.CreationDate
-	dict["comment"] = tf.Comment
-	dict["created by"] = tf.CreatedBy
-	dict["encoding"] = tf.Encoding
-	infoDict := make(map[string]interface{})
-	dict["info"] = infoDict
-	infoDict["name"] = tf.Info.Name
-	infoDict["piece length"] = tf.Info.PieceLength
-	piecesString := ""
-	for _, piece := range tf.Info.Pieces {
-		piecesString += string(piece)
-	}
-	infoDict["pieces"] = piecesString
-	infoDict["private"] = tf.Info.Private
-	infoDict["length"] = tf.Info.Length
-	if len(tf.Info.Files) > 0 {
-		filesList := make([]interface{}, 0)
-		for _, file := range tf.Info.Files {
-			filesList = append(filesList, make(map[string]interface{}))
-			if fileDict, ok := filesList[len(filesList)-1].(map[string]interface{}); ok {
-				fileDict["length"] = file.Length
-				fileDict["path"] = file.Path
-			}
-		}
-		infoDict["files"] = filesList
-	}
-	bencodedFile, err := bencode.BEncode(dict)
-
-	return bencodedFile, err
+	return bencode.BEncode(tf.dict)
 }
 
 func New() *TorrentFile {
@@ -102,6 +70,8 @@ func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 		return err
 	}
 	tf.logger.Debug("Successfully parsed dict\n")
+
+	tf.dict = dict
 
 	var ok bool
 	tf.Announce, ok = dict["announce"].(string)

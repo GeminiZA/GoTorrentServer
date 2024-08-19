@@ -200,7 +200,7 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 		Path:        bundlePath,
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
-		logger:      logger.New(logger.WARN, "Bundle"),
+		logger:      logger.New(logger.ERROR, "Bundle"),
 	}
 
 	if _, err := os.Stat(bundle.Path); err != nil {

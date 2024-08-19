@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -295,4 +296,75 @@ func (client *TorrentClient) processIncomingClients() {
 			client.logger.Error(fmt.Sprintf("Error on Peer(%s) trying to connect: Not serving infohash: %x", newPeer.Conn.RemoteAddr().String(), newPeer.InfoHash))
 		}
 	}
+}
+
+// Info Structs
+
+type TrackerInfo struct {
+	Url          string `json:"url"`
+	Status       string `json:"status"`
+	Leechers     int    `json:"leechers"`
+	Seeders      int    `json:"seeders"`
+	Peers        int    `json:"peers"`
+	LastAnnounce string `json:"lastannounce"`
+}
+
+type PeerInfo struct {
+	ID          string  `json:"peerid"`
+	Host        string  `json:"host"`
+	BitfieldHex string  `json:"bitfieldhex"`
+	Down        float64 `json:"down"`
+	Up          float64 `json:"up"`
+	Status      string  `json:"status"`
+}
+
+type SessionInfo struct {
+	Name        string        `json:"name"`
+	InfoHash    string        `json:"infohash"`
+	BitfieldHex string        `json:"bitfieldhex"`
+	TimeStarted string        `json:"time"`
+	Wasted      float64       `json:"wasted"`
+	Downloaded  float64       `json:"downloaded"`
+	Uploaded    float64       `json:"uploaded"`
+	Trackers    []TrackerInfo `json:"trackers"`
+	Error       string        `json:"error"`
+}
+
+type AllInfo struct {
+	Time     string        `json:"time"`
+	Sessions []SessionInfo `json:"sessions"`
+}
+
+func (client *TorrentClient) AllData() ([]byte, error) {
+	ret := AllInfo{
+		Time:     time.Now().String(),
+		Sessions: make([]SessionInfo, 0),
+	}
+	for _, sesh := range client.sessions {
+		newSeshInfo := SessionInfo{
+			Name:        sesh.Bundle.Name,
+			InfoHash:    string(sesh.Bundle.InfoHash),
+			BitfieldHex: sesh.Bundle.Bitfield.ToHex(),
+			Wasted:      0,
+			Downloaded:  sesh.TotalDownloadedKB,
+			Uploaded:    sesh.TotalUploadedKB,
+			Trackers:    make([]TrackerInfo, 0),
+			Error:       fmt.Sprintf("%v", sesh.Error),
+		}
+		for _, tr := range sesh.TrackerList.Trackers {
+			trerr := tr.TrackerError
+			if trerr == nil {
+				trerr = errors.New("null")
+			}
+			newSeshInfo.Trackers = append(newSeshInfo.Trackers, TrackerInfo{
+				Url:          tr.TrackerUrl,
+				Seeders:      int(tr.Seeders),
+				Leechers:     int(tr.Leechers),
+				Status:       trerr.Error(),
+				Peers:        len(tr.Peers),
+				LastAnnounce: tr.LastAnnounce.String(),
+			})
+		}
+	}
+	return json.Marshal(ret)
 }

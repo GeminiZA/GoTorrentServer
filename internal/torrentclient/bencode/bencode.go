@@ -213,7 +213,7 @@ func ParseDict(tokens []Token) (map[string]interface{}, error) {
 	i := 1
 	for i < len(tokens)-1 {
 		if tokens[i].Type != STRING {
-			return nil, fmt.Errorf("key not string token_index: %d", i)
+			return nil, fmt.Errorf("key not string token_index: %d token: %s", i, PrintToken(tokens[i]))
 		}
 		keyString := string(tokens[i].Value)
 		i++
@@ -295,6 +295,7 @@ func bEncodeString(val string) string {
 }
 
 func bEncodeList(list []interface{}) (string, error) {
+	fmt.Printf("Encoding list: %v\n", list)
 	bString := "l"
 	for _, item := range list {
 		switch v := item.(type) {
@@ -347,6 +348,8 @@ func BEncode(dict map[string]interface{}) (string, error) {
 				return "", err
 			}
 			bString += dictString
+		default:
+			fmt.Printf("Unknown type of %v: %T\n", value, value)
 		}
 	}
 	bString += "e"

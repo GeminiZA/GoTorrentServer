@@ -43,7 +43,7 @@ type Tracker struct {
 	Peers              []*PeerInfo
 	running            bool
 	Stopped            bool
-	lastAnnounce       time.Time
+	LastAnnounce       time.Time
 	TrackerError       error
 	mux                sync.Mutex
 
@@ -80,8 +80,9 @@ func New(url string, infoHash []byte, port uint16, downloaded int64, uploaded in
 		udpBuff:              nil,
 		connectionIDRecvTime: time.Time{},
 		timeoutStep:          0,
+		TrackerError:         nil,
 
-		logger: logger.New(logger.DEBUG, "Tracker"),
+		logger: logger.New(logger.ERROR, "Tracker"),
 	}
 }
 
@@ -307,7 +308,7 @@ func (tracker *Tracker) run() {
 	for tracker.running {
 		tracker.logger.Debug(fmt.Sprintf("Tracker(%s) running...\n", tracker.TrackerUrl))
 		time.Sleep(time.Second)
-		if tracker.announceErrorCount > 0 || tracker.lastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
+		if tracker.announceErrorCount > 0 || tracker.LastAnnounce.Add(tracker.MinInterval).After(time.Now()) {
 			err := tracker.announce(0)
 			if err != nil {
 				tracker.TrackerError = err

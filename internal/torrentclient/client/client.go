@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,6 +87,20 @@ func Start() (*TorrentClient, error) {
 		if err != nil {
 			client.logger.Error(fmt.Sprintf("failed to create session for infohash: %x: %v", hash, err))
 			continue
+		}
+		status, err := client.dbc.GetStatus(hash)
+		if err != nil {
+			client.logger.Error(fmt.Sprintf("failed to create session for infohash: %x: %v", hash, err))
+			continue
+		}
+		client.logger.Debug(fmt.Sprintf("Got status for torrent(%x): %d", hash, status))
+		if status == 1 {
+			client.logger.Debug(fmt.Sprintf("Starting session for torrent(%x)", hash))
+			err = sesh.Start()
+			if err != nil {
+				client.logger.Error(fmt.Sprintf("failed to start session for infohash: %x: %v", hash, err))
+				continue
+			}
 		}
 		client.sessions = append(client.sessions, sesh)
 	}
@@ -198,7 +213,7 @@ func (client *TorrentClient) RecheckTorrent(infoHash []byte) error {
 	return errors.New("session for infoHash not found")
 }
 
-func (client *TorrentClient) SetTorrentDownloadLimitKB(infoHash []byte, rateKB float64) error {
+func (client *TorrentClient) SetTorrentDownloadRateKB(infoHash []byte, rateKB float64) error {
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -215,7 +230,7 @@ func (client *TorrentClient) SetTorrentDownloadLimitKB(infoHash []byte, rateKB f
 	return errors.New("session for infoHash not found")
 }
 
-func (client *TorrentClient) SetTorrentUploadLimitKB(infoHash []byte, rateKB float64) error {
+func (client *TorrentClient) SetTorrentUploadRateKB(infoHash []byte, rateKB float64) error {
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -320,9 +335,9 @@ type PeerInfo struct {
 
 type SessionInfo struct {
 	Name           string        `json:"name"`
-	InfoHash       string        `json:"infohash"`
+	InfoHashB64    string        `json:"infohash_base64"`
 	BitfieldB64    string        `json:"bitfield_base64"`
-	BitFieldLenght int           `json:"bitfield_length`
+	BitFieldLength int           `json:"bitfield_length`
 	TimeStarted    string        `json:"time"`
 	Wasted         float64       `json:"wasted"`
 	Downloaded     float64       `json:"downloaded"`
@@ -336,7 +351,7 @@ type AllInfo struct {
 	Sessions []SessionInfo `json:"sessions"`
 }
 
-func (client *TorrentClient) AllData() ([]byte, error) {
+func (client *TorrentClient) AllDataJSON() ([]byte, error) {
 	ret := AllInfo{
 		Time:     time.Now().String(),
 		Sessions: make([]SessionInfo, 0),
@@ -344,9 +359,9 @@ func (client *TorrentClient) AllData() ([]byte, error) {
 	for _, sesh := range client.sessions {
 		newSeshInfo := SessionInfo{
 			Name:           sesh.Bundle.Name,
-			InfoHash:       string(sesh.Bundle.InfoHash),
-			BitfieldB64:    sesh.Bundle.Bitfield.ToBase64(),
-			BitFieldLenght: int(sesh.Bundle.Bitfield.Len()),
+			InfoHashB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.InfoHash),
+			BitfieldB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.Bitfield.Bytes),
+			BitFieldLength: int(sesh.Bundle.Bitfield.Len()),
 			Wasted:         0,
 			Downloaded:     sesh.TotalDownloadedKB,
 			Uploaded:       sesh.TotalUploadedKB,
@@ -370,4 +385,38 @@ func (client *TorrentClient) AllData() ([]byte, error) {
 		ret.Sessions = append(ret.Sessions, newSeshInfo)
 	}
 	return json.Marshal(ret)
+}
+
+func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infohash) {
+			ret := SessionInfo{
+				Name:           sesh.Bundle.Name,
+				InfoHashB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.InfoHash),
+				BitfieldB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.Bitfield.Bytes),
+				BitFieldLength: int(sesh.Bundle.Bitfield.Len()),
+				Wasted:         0,
+				Downloaded:     sesh.TotalDownloadedKB,
+				Uploaded:       sesh.TotalUploadedKB,
+				Trackers:       make([]TrackerInfo, 0),
+				Error:          fmt.Sprintf("%v", sesh.Error),
+			}
+			for _, tr := range sesh.TrackerList.Trackers {
+				trerr := tr.TrackerError
+				if trerr == nil {
+					trerr = errors.New("null")
+				}
+				ret.Trackers = append(ret.Trackers, TrackerInfo{
+					Url:          tr.TrackerUrl,
+					Seeders:      int(tr.Seeders),
+					Leechers:     int(tr.Leechers),
+					Status:       trerr.Error(),
+					Peers:        len(tr.Peers),
+					LastAnnounce: tr.LastAnnounce.String(),
+				})
+			}
+			return json.Marshal(ret)
+		}
+	}
+	return nil, errors.New("infohash not found in sessions")
 }

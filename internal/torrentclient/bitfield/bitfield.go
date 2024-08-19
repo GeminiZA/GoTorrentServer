@@ -1,7 +1,6 @@
 package bitfield
 
 import (
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -65,10 +64,6 @@ func New(len int64) *Bitfield {
 	}
 	bf.NumSet = 0
 	return &bf
-}
-
-func (bf *Bitfield) ToBase64() string {
-	return base64.StdEncoding.EncodeToString(bf.Bytes)
 }
 
 func (bf *Bitfield) Len() int64 {

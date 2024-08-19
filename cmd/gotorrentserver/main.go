@@ -66,21 +66,8 @@ func main() {
 		panic(err)
 	}
 	defer tc.Stop()
-	time.Sleep(4 * time.Second)
-	status, err := tc.AllData()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("AllData: %s\n", string(status))
-	time.Sleep(1 * time.Second)
 	tc.AddTorrentFromFile("./test_folder-d984f67af9917b214cd8b6048ab5624c7df6a07a.torrent", "./TestBundle", true)
-	time.Sleep(5 * time.Second)
-	status, err = tc.AllData()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("AllData: %s\n", string(status))
-	// handeRequests(tc)
+	handeRequests(tc)
 
 	fmt.Println("Stopped server")
 }

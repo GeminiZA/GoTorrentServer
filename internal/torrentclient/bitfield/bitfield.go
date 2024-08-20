@@ -14,8 +14,9 @@ type Bitfield struct {
 	NumSet   int64
 }
 
-func FromBytes(bytes []byte, len int64) *Bitfield {
-	bf := Bitfield{Bytes: bytes, len: len}
+func FromBytes(bytes []byte, Len int64) *Bitfield {
+	bf := Bitfield{Bytes: make([]byte, len(bytes)), len: Len}
+	copy(bf.Bytes, bytes)
 	for _, b := range bytes { // Count on bits
 		if b == 0xFF {
 			bf.NumSet += 8

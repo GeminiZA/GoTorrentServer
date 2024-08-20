@@ -602,6 +602,8 @@ func (session *Session) calcRates() {
 
 	session.DownloadRateKB = 0
 	session.UploadRateKB = 0
+	session.TotalDownloadedKB = 0
+	session.TotalUploadedKB = 0
 	for _, peer := range session.Peers {
 		session.TotalDownloadedKB += float64(peer.TotalBytesDownloaded) / 1024
 		session.TotalUploadedKB += float64(peer.TotalBytesUploaded) / 1024

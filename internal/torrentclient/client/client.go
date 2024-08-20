@@ -102,7 +102,7 @@ func Start() (*TorrentClient, error) {
 			}
 		}
 		client.sessions = append(client.sessions, sesh)
-		client.bitfields = append(client.bitfields, sesh.Bundle.Bitfield)
+		client.bitfields = append(client.bitfields, sesh.Bundle.Bitfield.Clone())
 	}
 	client.running = true
 	go client.runClient()
@@ -144,6 +144,32 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 		return err
 	}
 	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
+	if err != nil {
+		return err
+	}
+	client.sessions = append(client.sessions, newSesh)
+	client.bitfields = append(client.bitfields, newSesh.Bundle.Bitfield.Clone())
+	if start {
+		err = newSesh.Start()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (client *TorrentClient) AddTorrentFromString(metadata []byte, targetpath string, start bool) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
+	client.logger.Debug("Adding Torrent from string")
+	tf := torrentfile.New()
+	err := tf.ParseFileString(&metadata)
+	if err != nil {
+		return err
+	}
+	client.logger.Debug("Successfully parsed torrent metadata string")
+	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
 	if err != nil {
 		return err
 	}
@@ -312,7 +338,12 @@ func (client *TorrentClient) updateDatabase() {
 
 	for i := range client.sessions {
 		if !client.sessions[i].Bundle.Bitfield.Equals(client.bitfields[i]) {
-			client.dbc.UpdateBitfield(client.sessions[i].Bundle.InfoHash, client.sessions[i].Bundle.Bitfield)
+			err := client.dbc.UpdateBitfield(client.sessions[i].Bundle.InfoHash, client.sessions[i].Bundle.Bitfield)
+			if err != nil {
+				client.logger.Error(fmt.Sprintf("Error updating database bitfield %v", err))
+			} else {
+				client.bitfields[i] = client.sessions[i].Bundle.Bitfield.Clone()
+			}
 		}
 	}
 }
@@ -443,17 +474,53 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 }
 
 func (client *TorrentClient) PrintStatus() {
-	ret := "Infohash\t\t\t\t\tConnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Progress\n"
+	ret := "Infohash\t\t\t\t\tConnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
 	for _, sesh := range client.sessions {
-		downloadedStr := fmt.Sprintf("%.2f KiB", sesh.TotalDownloadedKB)
-		downloadedStr = fmt.Sprintf("%s%*s", downloadedStr, 22-len(downloadedStr), " ")
-		uploadedStr := fmt.Sprintf("%.2f KiB", sesh.TotalUploadedKB)
-		uploadedStr = fmt.Sprintf("%s%*s", uploadedStr, 22-len(uploadedStr), " ")
-		downrateStr := fmt.Sprintf("%.2f KiB/s", sesh.DownloadRateKB)
-		downrateStr = fmt.Sprintf("%s%*s", downrateStr, 22-len(downrateStr), " ")
-		uprateStr := fmt.Sprintf("%.2f KiB/s", sesh.UploadRateKB)
-		uprateStr = fmt.Sprintf("%s%*s", uprateStr, 22-len(uprateStr), " ")
-		ret += fmt.Sprintf("%x\t%d\t\t%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
+		downloadedKiB := sesh.TotalDownloadedKB
+		var downloadedStr string
+		if downloadedKiB < 10240 {
+			downloadedStr = fmt.Sprintf("%.2f KiB", sesh.TotalDownloadedKB)
+			downloadedStr = fmt.Sprintf("%s%*s", downloadedStr, 22-len(downloadedStr), " ")
+		} else if downloadedKiB < 1024*10240 {
+			downloadedStr = fmt.Sprintf("%.2f MiB", sesh.TotalDownloadedKB/1024)
+			downloadedStr = fmt.Sprintf("%s%*s", downloadedStr, 22-len(downloadedStr), " ")
+		} else {
+			downloadedStr = fmt.Sprintf("%.2f GiB", sesh.TotalDownloadedKB/1024/1024)
+			downloadedStr = fmt.Sprintf("%s%*s", downloadedStr, 22-len(downloadedStr), " ")
+		}
+		var uploadedStr string
+		uploadedKiB := sesh.TotalUploadedKB
+		if uploadedKiB < 10240 {
+			uploadedStr = fmt.Sprintf("%.2f KiB", sesh.TotalUploadedKB)
+			uploadedStr = fmt.Sprintf("%s%*s", uploadedStr, 22-len(uploadedStr), " ")
+		} else if uploadedKiB < 1024*10240 {
+			uploadedStr = fmt.Sprintf("%.2f MiB", sesh.TotalUploadedKB/1024)
+			uploadedStr = fmt.Sprintf("%s%*s", uploadedStr, 22-len(uploadedStr), " ")
+		} else {
+			uploadedStr = fmt.Sprintf("%.2f GiB", sesh.TotalUploadedKB/1024/1024)
+			uploadedStr = fmt.Sprintf("%s%*s", uploadedStr, 22-len(uploadedStr), " ")
+		}
+		var downrateStr string
+		downrate := sesh.DownloadRateKB
+		if downrate < 1024 {
+			downrateStr = fmt.Sprintf("%.2f KiB/s", downrate)
+			downrateStr = fmt.Sprintf("%s%*s", downrateStr, 22-len(downrateStr), " ")
+		} else {
+			downrateStr = fmt.Sprintf("%.2f MiB/s", downrate/1024)
+			downrateStr = fmt.Sprintf("%s%*s", downrateStr, 22-len(downrateStr), " ")
+		}
+		var uprateStr string
+		uprate := sesh.UploadRateKB
+		if uprate < 1024 {
+			uprateStr = fmt.Sprintf("%.2f KiB/s", uprate)
+			uprateStr = fmt.Sprintf("%s%*s", uprateStr, 22-len(uprateStr), " ")
+		} else {
+			uprateStr = fmt.Sprintf("%.2f MiB/s", uprate/1024)
+			uprateStr = fmt.Sprintf("%s%*s", uprateStr, 22-len(uprateStr), " ")
+		}
+		totalSizeStr := fmt.Sprintf("%.2f MiB", float64(sesh.Bundle.Length)/1024/1024)
+		totalSizeStr = fmt.Sprintf("%s%*s", totalSizeStr, 22-len(totalSizeStr), " ")
+		ret += fmt.Sprintf("%x\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
 	}
 	ret += "==================================================\n"
 	fmt.Print(ret)

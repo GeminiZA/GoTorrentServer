@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -131,10 +132,33 @@ func AddTorrentFile(w http.ResponseWriter, r *http.Request, tc *client.TorrentCl
 		err := Authenticate(DevAlwaysTrue)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			logResponse("alldata", remoteHost, http.StatusUnauthorized)
+			logResponse("addtorrentfile", remoteHost, http.StatusUnauthorized)
 			return
 		}
 	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		logResponse("addtorrentfile", remoteHost, http.StatusMethodNotAllowed)
+		return
+	}
+	values := r.URL.Query()
+	path := values.Get("path")
+	start := values.Get("start") == "true"
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		logResponse("addtorrentfile", remoteHost, http.StatusInternalServerError)
+		return
+	}
+	fmt.Printf("Got body from add: %s\n", string(body))
+	err = tc.AddTorrentFromString(body, path, start)
+	if err != nil {
+		http.Error(w, "Error adding torrent", http.StatusInternalServerError)
+		logResponse("addtorrentfile", remoteHost, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	logResponse("addtorrentfile", remoteHost, http.StatusOK)
 }
 
 func StopTorrent(w http.ResponseWriter, r *http.Request, tc *client.TorrentClient) {

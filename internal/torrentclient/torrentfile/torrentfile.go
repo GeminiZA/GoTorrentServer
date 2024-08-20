@@ -44,7 +44,7 @@ func (tf *TorrentFile) Bencode() (string, error) {
 
 func New() *TorrentFile {
 	return &TorrentFile{
-		logger: logger.New(logger.ERROR, "TorrentFile"),
+		logger: logger.New(logger.DEBUG, "TorrentFile"),
 	}
 }
 

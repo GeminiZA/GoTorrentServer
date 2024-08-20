@@ -66,7 +66,8 @@ func main() {
 		panic(err)
 	}
 	defer tc.Stop()
-	tc.AddTorrentFromFile("./test_folder-d984f67af9917b214cd8b6048ab5624c7df6a07a.torrent", "./TestBundle", true)
+	// tc.AddTorrentFromFile("./hotd.torrent", "./TestBundle", true)
+	// fmt.Println("Added Torrent from hotd.torrent")
 	handeRequests(tc)
 
 	fmt.Println("Stopped server")

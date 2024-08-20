@@ -66,8 +66,11 @@ func main() {
 		panic(err)
 	}
 	defer tc.Stop()
-	// tc.AddTorrentFromFile("./hotd.torrent", "./TestBundle", true)
-	// fmt.Println("Added Torrent from hotd.torrent")
+	err = tc.AddTorrentFromFile("./hotd.torrent", "./TestBundleH", true)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("Added Torrent from hotd.torrent")
 	handeRequests(tc)
 
 	fmt.Println("Stopped server")

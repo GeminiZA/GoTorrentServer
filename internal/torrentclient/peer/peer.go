@@ -59,12 +59,12 @@ type Peer struct {
 	peerID         []byte
 	infoHash       []byte
 	bitField       *bitfield.Bitfield
-	remoteBitfield *bitfield.Bitfield
+	RemoteBitfield *bitfield.Bitfield
 	numPieces      int64
 	// Functional
 	conn             net.Conn
-	timeLastReceived time.Time
-	timeLastSent     time.Time
+	TimeLastReceived time.Time
+	TimeLastSent     time.Time
 	mux              sync.Mutex
 	Connected        bool
 	Keepalive        bool
@@ -115,10 +115,10 @@ func Add(
 		RemotePort:       peerPort,
 		infoHash:         infohash,
 		bitField:         myBitfield,
-		remoteBitfield:   bitfield.New(myBitfield.Len()),
+		RemoteBitfield:   bitfield.New(myBitfield.Len()),
 		numPieces:        numPieces,
-		timeLastReceived: time.Now(),
-		timeLastSent:     time.Now(),
+		TimeLastReceived: time.Now(),
+		TimeLastSent:     time.Now(),
 		Connected:        false,
 		Keepalive:        false,
 		AmInterested:     false,
@@ -186,10 +186,10 @@ func Connect(
 		RemotePort:       remotePort,
 		infoHash:         infohash,
 		bitField:         myBitfield,
-		remoteBitfield:   bitfield.New(myBitfield.Len()),
+		RemoteBitfield:   bitfield.New(myBitfield.Len()),
 		numPieces:        numPieces,
-		timeLastReceived: time.Now(),
-		timeLastSent:     time.Now(),
+		TimeLastReceived: time.Now(),
+		TimeLastSent:     time.Now(),
 		Connected:        false,
 		Keepalive:        false,
 		AmInterested:     false,
@@ -457,7 +457,7 @@ func (peer *Peer) HasPiece(pieceIndex int64) bool {
 	if peer.bitField == nil {
 		return false
 	}
-	return peer.remoteBitfield.GetBit(pieceIndex)
+	return peer.RemoteBitfield.GetBit(pieceIndex)
 }
 
 func (peer *Peer) Have(pieceIndex int64) error {
@@ -477,7 +477,7 @@ func (peer *Peer) runOutgoing() {
 		peer.UpdateRates()
 
 		// Check if alive
-		if time.Now().After(peer.timeLastReceived.Add(30 * time.Second)) {
+		if time.Now().After(peer.TimeLastReceived.Add(30 * time.Second)) {
 			// Cancel all requests
 			peer.requestCancelledQueue = append(peer.requestCancelledQueue, peer.requestOutQueue...)
 			peer.requestOutQueue = make([]*blockRequest, 0)
@@ -487,9 +487,9 @@ func (peer *Peer) runOutgoing() {
 
 		// If client has all pieces of remote peer no longer interested
 		if peer.bitField != nil &&
-			peer.remoteBitfield != nil &&
+			peer.RemoteBitfield != nil &&
 			peer.AmInterested &&
-			peer.bitField.HasAll(peer.remoteBitfield) {
+			peer.bitField.HasAll(peer.RemoteBitfield) {
 			peer.sendNotInterested()
 		}
 
@@ -528,7 +528,7 @@ func (peer *Peer) runOutgoing() {
 		}
 
 		// Send keep alive
-		if time.Now().After(peer.timeLastSent.Add(20 * time.Second)) {
+		if time.Now().After(peer.TimeLastSent.Add(20 * time.Second)) {
 			err = peer.sendKeepAlive()
 			if err != nil {
 				peer.logger.Warn(fmt.Sprintf("Error sending keep alive: %v\n", err))
@@ -653,7 +653,7 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 	peer.mux.Lock()
 	defer peer.mux.Unlock()
 
-	peer.timeLastReceived = time.Now()
+	peer.TimeLastReceived = time.Now()
 	if msg == nil {
 		return nil
 	}
@@ -670,9 +670,9 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 		peer.RemoteInterested = false
 		peer.requestInQueue = make([]*blockRequest, 0)
 	case message.HAVE:
-		peer.remoteBitfield.SetBit(int64(msg.Index))
+		peer.RemoteBitfield.SetBit(int64(msg.Index))
 	case message.BITFIELD:
-		peer.remoteBitfield = bitfield.FromBytes(msg.BitField, peer.numPieces)
+		peer.RemoteBitfield = bitfield.FromBytes(msg.BitField, peer.numPieces)
 	case message.REQUEST:
 		if !peer.RemoteInterested || peer.AmChoking {
 			return nil
@@ -769,7 +769,7 @@ func (peer *Peer) sendMessage(msg *message.Message) error {
 	if n != len(msgBytes) {
 		return errors.New("incomplete message send")
 	}
-	peer.timeLastSent = time.Now()
+	peer.TimeLastSent = time.Now()
 	return nil
 }
 

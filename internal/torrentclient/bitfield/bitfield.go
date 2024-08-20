@@ -167,6 +167,18 @@ func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
 	return true
 }
 
+func (bfA *Bitfield) NumDiff(bfB *Bitfield) int {
+	diffCount := 0
+	for i := range bfA.Bytes {
+		xor := bfA.Bytes[i] ^ bfB.Bytes[i]
+		for xor != 0 {
+			xor &= xor - 1
+			diffCount++
+		}
+	}
+	return diffCount
+}
+
 func (bf *Bitfield) Print() string {
 	msg := fmt.Sprintf("Bitfield (%d): ", bf.len)
 	for _, b := range bf.Bytes {

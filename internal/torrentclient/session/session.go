@@ -39,6 +39,7 @@ type Session struct {
 	UnconnectedPeers []*tracker.PeerInfo
 	ConnectedPeers   []*tracker.PeerInfo
 	ConnectingPeers  []*tracker.PeerInfo
+	BannedPeers      []*tracker.PeerInfo
 
 	listenPort uint16
 	peerID     []byte
@@ -212,6 +213,18 @@ func (session *Session) run() {
 			for _, curPeer := range session.Peers {
 				if time.Now().After(curPeer.TimeConnected.Add(time.Second*20)) && curPeer.TotalBytesDownloaded < 1 {
 					session.disconnectPeer(curPeer.RemotePeerID)
+					session.BannedPeers = append(session.BannedPeers, &tracker.PeerInfo{IP: curPeer.RemoteIP, Port: curPeer.RemotePort})
+				}
+				if time.Now().After(curPeer.TimeLastReceived.Add(time.Second*5)) && curPeer.RemoteChoking {
+					session.disconnectPeer(curPeer.RemotePeerID)
+					session.BannedPeers = append(session.BannedPeers, &tracker.PeerInfo{IP: curPeer.RemoteIP, Port: curPeer.RemotePort})
+				}
+			}
+
+			for _, curPeer := range session.Peers {
+				if float64(session.Bundle.Bitfield.NumDiff(curPeer.RemoteBitfield))/float64(session.Bundle.Bitfield.Len()) > 20 {
+					session.disconnectPeer(curPeer.RemotePeerID)
+					session.BannedPeers = append(session.BannedPeers, &tracker.PeerInfo{IP: curPeer.RemoteIP, Port: curPeer.RemotePort})
 				}
 			}
 
@@ -544,6 +557,11 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 	for _, peer := range session.Peers {
 		if peer.RemoteIP == pi.IP && peer.RemotePort == pi.Port {
 			return errors.New("peer already connected")
+		}
+	}
+	for _, peerinfo := range session.BannedPeers {
+		if peerinfo.IP == pi.IP && peerinfo.Port == pi.Port {
+			return errors.New("peer banned")
 		}
 	}
 	peer, err := peer.Connect(

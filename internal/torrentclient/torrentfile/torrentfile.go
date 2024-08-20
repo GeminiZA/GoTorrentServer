@@ -128,10 +128,9 @@ func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 		tf.Info.Pieces = append(tf.Info.Pieces, []byte(piecesString[i:i+20]))
 	}
 	privateBool, ok := infoDict["private"].(int64)
-	if !ok {
-		return errors.New("no private")
+	if ok {
+		tf.Info.Private = privateBool != 0
 	}
-	tf.Info.Private = privateBool != 0
 	length, ok := infoDict["length"].(int64)
 	if ok {
 		tf.Info.Length = length

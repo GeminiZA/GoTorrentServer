@@ -36,7 +36,6 @@ func New(LogLevel byte, packageStr string) *Logger {
 	} else {
 		logger.LogLevel = LogLevel
 	}
-	fmt.Printf("Started logger for %s: Level: %d\n", packageStr, logger.LogLevel)
 	return logger
 }
 

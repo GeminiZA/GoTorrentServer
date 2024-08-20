@@ -29,10 +29,9 @@ type TorrentClient struct {
 	sessions     []*session.Session
 	bitfields    []*bitfield.Bitfield
 	dbc          *database.DBConn
-	listenServer *listenserver.ListenServer
-	// peerInChan   chan<- *peer.Peer
-	running bool
-	mux     sync.Mutex
+	listenServer *listenserver.ListenServer // peerInChan   chan<- *peer.Peer
+	running      bool
+	mux          sync.Mutex
 
 	logger *logger.Logger
 }
@@ -103,8 +102,10 @@ func Start() (*TorrentClient, error) {
 			}
 		}
 		client.sessions = append(client.sessions, sesh)
+		client.bitfields = append(client.bitfields, sesh.Bundle.Bitfield)
 	}
 	client.running = true
+	go client.runClient()
 	// client.listenServer, err = listenserver.New(ListenPort, client.peerInChan)
 	//	if err != nil {
 	// 	return client, err
@@ -127,8 +128,8 @@ func (client *TorrentClient) Stop() error {
 func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPath string, start bool) error {
 	client.mux.Lock()
 	defer client.mux.Unlock()
-	tf := torrentfile.New()
 
+	tf := torrentfile.New()
 	err := tf.ParseFile(torrentfilePath)
 	if err != nil {
 		return err
@@ -163,6 +164,9 @@ func AddTorrentFromURL(magnet string) error {
 }
 
 func (client *TorrentClient) StartTorrent(infoHash []byte) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -180,6 +184,9 @@ func (client *TorrentClient) StartTorrent(infoHash []byte) error {
 }
 
 func (client *TorrentClient) StopTorrent(infoHash []byte) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -197,6 +204,9 @@ func (client *TorrentClient) StopTorrent(infoHash []byte) error {
 }
 
 func (client *TorrentClient) RecheckTorrent(infoHash []byte) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -214,6 +224,9 @@ func (client *TorrentClient) RecheckTorrent(infoHash []byte) error {
 }
 
 func (client *TorrentClient) SetTorrentDownloadRateKB(infoHash []byte, rateKB float64) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -231,6 +244,9 @@ func (client *TorrentClient) SetTorrentDownloadRateKB(infoHash []byte, rateKB fl
 }
 
 func (client *TorrentClient) SetTorrentUploadRateKB(infoHash []byte, rateKB float64) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -248,6 +264,9 @@ func (client *TorrentClient) SetTorrentUploadRateKB(infoHash []byte, rateKB floa
 }
 
 func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
+	client.mux.Lock()
+	defer client.mux.Unlock()
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -271,6 +290,7 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 	}
 	if seshIndex != -1 {
 		client.sessions = append(client.sessions[:seshIndex], client.sessions[seshIndex+1:]...)
+		client.bitfields = append(client.bitfields[:seshIndex], client.bitfields[seshIndex+1:]...)
 		return nil
 	} else {
 		return errors.New("session for infoHash not found")
@@ -278,10 +298,11 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 }
 
 func (client *TorrentClient) runClient() {
-	go client.processIncomingClients()
+	// go client.processIncomingClients()
 	for client.running {
 		client.updateDatabase()
 		time.Sleep(time.Millisecond * 1000)
+		client.PrintStatus()
 	}
 }
 
@@ -419,4 +440,21 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 		}
 	}
 	return nil, errors.New("infohash not found in sessions")
+}
+
+func (client *TorrentClient) PrintStatus() {
+	ret := "Infohash\t\t\t\t\tConnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Progress\n"
+	for _, sesh := range client.sessions {
+		downloadedStr := fmt.Sprintf("%.2f KiB", sesh.TotalDownloadedKB)
+		downloadedStr = fmt.Sprintf("%s%*s", downloadedStr, 22-len(downloadedStr), " ")
+		uploadedStr := fmt.Sprintf("%.2f KiB", sesh.TotalUploadedKB)
+		uploadedStr = fmt.Sprintf("%s%*s", uploadedStr, 22-len(uploadedStr), " ")
+		downrateStr := fmt.Sprintf("%.2f KiB/s", sesh.DownloadRateKB)
+		downrateStr = fmt.Sprintf("%s%*s", downrateStr, 22-len(downrateStr), " ")
+		uprateStr := fmt.Sprintf("%.2f KiB/s", sesh.UploadRateKB)
+		uprateStr = fmt.Sprintf("%s%*s", uprateStr, 22-len(uprateStr), " ")
+		ret += fmt.Sprintf("%x\t%d\t\t%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
+	}
+	ret += "==================================================\n"
+	fmt.Print(ret)
 }

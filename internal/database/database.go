@@ -23,9 +23,8 @@ type DBConn struct {
 // path => path to download target
 // status => 0 (paused) / 1 (running)
 
-func Connect() (*DBConn, error) {
-	const file string = "gotorrentserver.db"
-	db, err := sql.Open("sqlite3", file)
+func Connect(dbPath string) (*DBConn, error) {
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
 	}

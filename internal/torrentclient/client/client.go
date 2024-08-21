@@ -33,17 +33,27 @@ type TorrentClient struct {
 	running      bool
 	mux          sync.Mutex
 
+	torrentPort int
+	maxConnections int
+
 	logger *logger.Logger
 }
 
-func Start() (*TorrentClient, error) {
+func Start(
+	torrentPort int,
+	dbPath string,
+	maxConnections int,
+) (*TorrentClient, error) {
+	fmt.Printf("Listen port not implemented: port %d\n", torrentPort)
 	var err error
 	client := &TorrentClient{
 		sessions: make([]*session.Session, 0),
 		logger:   logger.New(logger.DEBUG, "TorrentClient"),
 		// peerInChan: make(chan<- *peer.Peer, 10),
+		maxConnections: maxConnections,
+		torrentPort: torrentPort,
 	}
-	client.dbc, err = database.Connect()
+	client.dbc, err = database.Connect(dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +92,7 @@ func Start() (*TorrentClient, error) {
 			bf,
 			ListenPort,
 			[]byte(PeerIDStr),
+			client.maxConnections,
 		)
 		if err != nil {
 			client.logger.Error(fmt.Sprintf("failed to create session for infohash: %x: %v", hash, err))
@@ -143,7 +154,7 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 	if err != nil {
 		return err
 	}
-	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
+	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr), client.maxConnections)
 	if err != nil {
 		return err
 	}
@@ -174,7 +185,7 @@ func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath 
 			return errors.New("session already exists")
 		}
 	}
-	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
+	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr), client.maxConnections)
 	if err != nil {
 		return err
 	}

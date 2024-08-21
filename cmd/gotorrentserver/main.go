@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,6 +18,13 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
 )
+
+type Config struct {
+	TorrentPort int `json:"torrent_port"`
+	DBPath string `json:"db_path"`
+	MaxConnections int `json:"max_connections"`
+	APIPort int `json:"api_port"`
+}
 
 func main() {
 	args := os.Args
@@ -46,32 +54,51 @@ func main() {
 				TestSession(os.Args[4], myPeerID)
 			case "tracker":
 				TestTrackerList(os.Args[4], myPeerID, logger)
-			case "client":
-				TestClient(os.Args[4])
 			default:
 				panic(fmt.Errorf("pkg: %s tests not implemented", testPkg))
 			}
 
 		} else {
 			fmt.Println("Server not implemented")
-			// Run server
 		}
 	}
 
 	// else run server
 
+	cfg := Config{
+		MaxConnections: 50,
+		TorrentPort: 6681,
+		DBPath: "./gotorrentserver.db",
+		APIPort: 8080,
+	}
+	cfgFile, err := os.OpenFile("./config.json", os.O_RDONLY, 0644)
+	if err != nil {
+		fmt.Printf("Error reading config: %v... Loaded default config", err)
+	} else {
+		defer cfgFile.Close()
+		decoder := json.NewDecoder(cfgFile)
+		err = decoder.Decode(&cfg)
+		if err != nil {
+			fmt.Printf("Error decoding config file: %v... Loaded default config", err)
+		}
+	}
+
 	fmt.Println("Starting server")
-	tc, err := client.Start()
+	tc, err := client.Start(
+		cfg.TorrentPort,
+		cfg.DBPath,
+		cfg.MaxConnections,
+	)
 	if err != nil {
 		panic(err)
 	}
 	defer tc.Stop()
-	handeRequests(tc)
+	handeRequests(tc, cfg.APIPort)
 
 	fmt.Println("Stopped server")
 }
 
-func handeRequests(tc *client.TorrentClient) {
+func handeRequests(tc *client.TorrentClient, port int) {
 	http.HandleFunc("/alldata", func(w http.ResponseWriter, r *http.Request) { api.AllData(w, r, tc) })
 	http.HandleFunc("/torrentdata", func(w http.ResponseWriter, r *http.Request) { api.TorrentData(w, r, tc) })
 	http.HandleFunc("/addtorrentfile", func(w http.ResponseWriter, r *http.Request) { api.AddTorrentFile(w, r, tc) })
@@ -83,17 +110,7 @@ func handeRequests(tc *client.TorrentClient) {
 	http.HandleFunc("/settorrentuprate", func(w http.ResponseWriter, r *http.Request) { api.SetTorrentUpRate(w, r, tc) })
 	http.HandleFunc("/setglobaldownrate", func(w http.ResponseWriter, r *http.Request) { api.SetGlobalDownRate(w, r, tc) })
 	http.HandleFunc("/setglobaluprate", func(w http.ResponseWriter, r *http.Request) { api.SetGlobalUpRate(w, r, tc) })
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-func TestClient(tfPath string) {
-	tc, err := client.Start()
-	defer tc.Stop()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	time.Sleep(5 * time.Second)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
 func TestTrackerList(tfPath string, myPeerID []byte, logger *log.Logger) {
@@ -107,7 +124,7 @@ func TestTrackerList(tfPath string, myPeerID []byte, logger *log.Logger) {
 	if err != nil {
 		panic(err)
 	}
-	dbc, err := database.Connect()
+	dbc, err := database.Connect("./gotorrentserver.db")
 	if err != nil {
 		panic(err)
 	}
@@ -130,7 +147,7 @@ func TestSession(tfPath string, myPeerID []byte) {
 	}
 	fmt.Println("Torrentfile succesfully parsed")
 	listenPort := uint16(6681)
-	sesh, err := session.New("./TestBundle", tf, bitfield.New(int64(len(tf.Info.Pieces))), listenPort, myPeerID)
+	sesh, err := session.New("./TestBundle", tf, bitfield.New(int64(len(tf.Info.Pieces))), listenPort, myPeerID, 50)
 	if err != nil {
 		panic(err)
 	}

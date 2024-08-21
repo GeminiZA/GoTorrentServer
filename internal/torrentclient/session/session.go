@@ -75,7 +75,7 @@ func (bra *blockRequest) Equal(brb *blockRequest) bool {
 
 // Exported
 
-func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listenPort uint16, peerID []byte) (*Session, error) {
+func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listenPort uint16, peerID []byte, maxConnections int) (*Session, error) {
 	session := Session{
 		Peers:                   make([]*peer.Peer, 0, 20),
 		Path:                    path,
@@ -88,7 +88,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		timeLastResponsesQueued: time.Now(),
 		maxRequestsOutRate:      0,
 		maxResponsesOutRate:     0,
-		maxPeers:                50,
+		maxPeers:                maxConnections,
 		DownloadRateKB:          0,
 		UploadRateKB:            0,
 		BlockQueue:              make([]*blockRequest, 0, 256),

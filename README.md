@@ -5,99 +5,120 @@
 Torrent client with http endpoint interface for remote torrent management
 
 ## Interface
+
 ### Headers:
+
 All endpoints need the following headers:
-- Authorization
+
+- Authorization ** Not implemented yet **
+
 ### Endpoints:
+
 #### /alldata (**GET**):
-- No additional headers
+
+- no additional parameters
 - Returns json:
+
 ```
 {
 "time": response UTC time string,
 "sessions": [
   {
     "name": name,
-	"infohash", 20 byte info hash as utf8 string,
-    "pieces": bitfield of pieces the client has,
-	"timestarted": time session was started,
-	"wasted": kb wasted from piece hash failures or cancelled block requests,
-	"downloaded": kb downloaded since session start,
-	"uploaded": kb downloaded since session start,
-	"trackers": [
-	  "url": tracker url,
-	  "status": working / error,
-	  "leechers": int,
-	  "seeders": int,
-	  "peers": int,
-	  "lastannounce": UTC time string
-	],
-    "Peers": [
-	  {
-	    "ID": peerID,
-	    "host": "IP:port",
-	    "pieces": bitfield of pieces the peer has,
-	    "down": download rate in kbps,
-	    "up": upload rate in kbps
-      }
+    "infohash_base64": base64 of 20 byte infohash,
+    "bitfield_base64": bitfield of pieces the client has,
+    "bitfield_length": number of bits in the bitfield,
+    "timestarted": time session was started,
+    "wasted": kb wasted from piece hash failures or cancelled block requests,
+    "downloaded": kb downloaded since session start,
+    "uploaded": kb downloaded since session start,
+    "error": nil if no session error,
+    "trackers": [
+      {
+        "url": tracker url,
+        "status": working / error,
+        "leechers": int,
+        "seeders": int,
+        "peers": int,
+        "lastannounce": UTC time string
+      },
+      ...
     ],
-    "status": connected / disconnected etc
-  }
+    "Peers": [
+      {
+        "ID": peerID,
+        "host": "IP:port",
+        "bitfield_base64": bitfield of pieces the peer has,
+        "bitfield_length": number of bits in the bitfield,
+        "downrate": download rate in kbps,
+        "uprate": upload rate in kbps,
+        "downloaded": kb downloaded,
+        "uploaded": kb uploaded,
+        "connected": boolean,
+        "relevence": relevence of peer 0 -> 1
+      },
+      ...
+    ]
+  },
+  ...
 ],
 }
 ```
 
 #### /torrentdata (GET)
 
-- Additional headers:
-```
-{
-  "infohash": torrent info hash as string
-}
-```
+- Additional query parameters:
+
+  infohash: hex of 20 byte info hash
 
 - Returns json:
+
 ```
 {
   "name": name,
-  "infohash": 20 byte infohash as utf8 string,
-  "pieces": bitfield of pieces the client has,
+  "infohash_base64": base64 of 20 byte infohash,
+  "bitfield_base64": bitfield of pieces the client has,
+  "bitfield_length": number of bits in the bitfield,
   "timestarted": time session was started,
   "wasted": kb wasted from piece hash failures or cancelled block requests,
   "downloaded": kb downloaded since session start,
   "uploaded": kb downloaded since session start,
+  "error": nil if no session error,
   "trackers": [
-  "url": tracker url,
-  "status": working / error,
-  "leechers": int,
-  "seeders": int,
-  "peers": int,
-  "lastannounce": UTC time string
+    {
+      "url": tracker url,
+      "status": working / error,
+      "leechers": int,
+      "seeders": int,
+      "peers": int,
+      "lastannounce": UTC time string
+    },
+    ...
   ],
   "Peers": [
-	{
-	  "ID": peerID,
-	  "host": "IP:port",
-	  "pieces": bitfield of pieces the peer has,
-	  "down": download rate in kbps,
-	  "up": upload rate in kbps
-    }
-  ],
-  "status": connected / disconnected etc
+    {
+      "ID": peerID,
+      "host": "IP:port",
+      "bitfield_base64": bitfield of pieces the peer has,
+      "bitfield_length": number of bits in the bitfield,
+      "downrate": download rate in kbps,
+      "uprate": upload rate in kbps,
+      "downloaded": kb downloaded,
+      "uploaded": kb uploaded,
+      "connected": boolean,
+      "relevence": relevence of peer 0 -> 1
+    },
+    ...
+  ]
 }
 ```
 
 #### /addmagnet (POST)
 
-- Additional headers:
-```
-{
-  "time": UTC time string of request time,
-  "content-type": "application/json" 
-}
-```
+### Not implemented yet
 
 - Body:
+
 ```
 {
   "url": magnet url,
@@ -110,81 +131,58 @@ All endpoints need the following headers:
 - Returns status only
 
 #### /addtorrentfile (POST)
-- Additional headers:
-```
-{
-  "time": UTC time string of request time,
-  "content-type": "application/json" 
-}
-```
 
-- Body:
-```
-{
-  "file": bencoded file in utf8 string,
-  "targetdir": directory to save the bundle at,
-  "maxdown": max download rate in kbps,
-  "maxup": max upload rate in kbps,
-}
-```
+- Additional query parameters:
 
-- Returns status only 
+  - path: path to download target directory
+  - start: "true" / "false"
+  - maxdown: max download rate in KiB/s (optional)
+  - maxup: max upload rate in KiB/s (optional)
 
-#### /pause (GET)
-
-- Additional headers:
-```
-{
-  "infohash": 20 byte infohash as utf8 string
-}
-```
+- Body: binary metadata file
 
 - Returns status only
 
+#### /stoptorrent (GET)
 
-#### /resume (GET)
+- Additional query parameters:
 
-- Additional headers:
-```
-{
-  "infohash": 20 byte infohash as utf8 string
-}
-```
+  - infohash: hex of the 20 byte infohash
 
 - Returns status only
 
-#### /remove (GET)
+#### /starttorrent (GET)
 
-- Additional headers:
-```
-{
-  "infohash": 20 byte infohash as utf8 string,
-  "deletedata": bool to delete the downloaded data also
-}
-```
+- Additional query parameters:
+
+  - infohash: hex of the 20 byte infohash
+
+- Returns status only
+
+#### /removetorrent (GET)
+
+- Additional query parameters:
+
+  - infohash: hex of 20 byte infohash
+  - delete: "true" / "false" whether to delete the downloaded torrent data
 
 - Returns status only
 
 #### /setdownrate(GET)
 
-- Additional headers:
-```
-{
-  "infohash": infohash,
-  "downrate": max download rate in kbps
-}
-```
+- Additional query parameters:
+
+  - infohash: hex of 20 byte infohash
+  - rate: max download rate in KiB/s
 
 - Returns status only
 
 #### /setuprate(GET)
 
-- Additional headers:
-```
-{
-  "infohash": infohash,
-  "uprate": max upload rate in kbps
-}
-```
+- Additional query parameters:
+
+  - infohash: hex of 20 byte infohash
+  - rate: max upload rate in KiB/s
 
 - Returns status only
+

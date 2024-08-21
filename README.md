@@ -6,6 +6,13 @@ Torrent client with http endpoint interface for remote torrent management
 
 ## Interface
 
+### Notes:
+
+- Only supports sequential piece selection so far
+- No peer exchange (PEX) yet
+- No BitTorrent extensions yet (thus no magnet URIs)
+- Probably quite unstable
+
 ### Headers:
 
 All endpoints need the following headers:
@@ -185,4 +192,3 @@ All endpoints need the following headers:
   - rate: max upload rate in KiB/s
 
 - Returns status only
-

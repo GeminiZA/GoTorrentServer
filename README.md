@@ -1,7 +1,5 @@
 # GoTorrentServer
 
----
-
 Torrent client with http endpoint interface for remote torrent management
 
 ## Notes:

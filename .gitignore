@@ -1,6 +1,9 @@
 *.db
 *.meta
 *.log
+*.torrent
+*.json
+!example_config.json
 ./test_folder*
 ./TestBundle
 ./ClientTestBundle

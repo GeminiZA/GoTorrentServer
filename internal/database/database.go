@@ -91,11 +91,13 @@ func (dbc *DBConn) RemoveTorrent(infoHash []byte) error {
 	dbc.mux.Lock()
 	defer dbc.mux.Unlock()
 
+	infoHashStr := string(infoHash)
+
 	const query = `
     DELETE FROM torrents WHERE info_hash = ?
     `
 
-	_, err := dbc.db.Exec(query, infoHash)
+	_, err := dbc.db.Exec(query, infoHashStr)
 	if err != nil {
 		return err
 	}

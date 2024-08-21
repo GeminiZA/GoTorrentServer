@@ -317,7 +317,8 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 	if seshIndex != -1 {
 		client.sessions = append(client.sessions[:seshIndex], client.sessions[seshIndex+1:]...)
 		client.bitfields = append(client.bitfields[:seshIndex], client.bitfields[seshIndex+1:]...)
-		return nil
+		err := client.dbc.RemoveTorrent(infoHash)
+		return err
 	} else {
 		return errors.New("session for infoHash not found")
 	}
@@ -505,7 +506,7 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 }
 
 func (client *TorrentClient) PrintStatus() {
-	ret := "Infohash\t\t\t\t\tConnected\tLeechers\tSeeders\t\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
+	ret := "Infohash\t\t\t\t\tConnected\tConnecting\tUnconnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
 	for _, sesh := range client.sessions {
 		downloadedKiB := sesh.TotalDownloadedKB
 		var downloadedStr string
@@ -551,13 +552,7 @@ func (client *TorrentClient) PrintStatus() {
 		}
 		totalSizeStr := fmt.Sprintf("%.2f MiB", float64(sesh.Bundle.Length)/1024/1024)
 		totalSizeStr = fmt.Sprintf("%s%*s", totalSizeStr, 22-len(totalSizeStr), " ")
-		ret += fmt.Sprintf("%x\t%d\t\t%d\t\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), sesh.TrackerList.Leechers, sesh.TrackerList.Seeders, downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
-		ret += "Peers:\n"
-		ret += "\tID\t\t\t\t\t\tRelevance\n"
-		for _, peer := range sesh.Peers {
-			ret += fmt.Sprintf("\t%x\t%.2f\n", peer.RemotePeerID, peer.GetRelevance(sesh.Bundle.Bitfield))
-		}
-		ret += "--------------------------------------------------\n"
+		ret += fmt.Sprintf("%x\t%d\t\t%d\t\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), len(sesh.ConnectingPeers), len(sesh.UnconnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
 	}
 	ret += "==================================================\n"
 	fmt.Print(ret)

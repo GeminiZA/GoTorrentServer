@@ -545,6 +545,7 @@ func (peer *Peer) runOutgoing() {
 
 		// Handle timed pieces
 
+		peer.mux.Lock()
 		i := 0
 		for i < len(peer.requestOutQueue) {
 			if peer.requestOutQueue[i].Sent && time.Now().After(peer.requestOutQueue[i].ReqTime.Add(BLOCK_REQUEST_TIMEOUT_MS*time.Millisecond)) {
@@ -556,6 +557,7 @@ func (peer *Peer) runOutgoing() {
 				i++
 			}
 		}
+		peer.mux.Unlock()
 
 		time.Sleep(100 * time.Millisecond)
 

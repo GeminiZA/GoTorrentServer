@@ -529,6 +529,10 @@ func (session *Session) findNewPeer() {
 	}
 	for len(session.UnconnectedPeers) > 0 {
 		session.mux.Lock()
+		if len(session.UnconnectedPeers) < 1 {
+			session.mux.Unlock()
+			continue
+		}
 		peerInfo := session.UnconnectedPeers[0]
 		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
 		session.UnconnectedPeers = session.UnconnectedPeers[1:]

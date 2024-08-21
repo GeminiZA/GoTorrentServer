@@ -54,10 +54,10 @@ func (tf *TorrentFile) ParseFileString(data *[]byte) error {
 	timeStart := time.Now()
 
 	tf.InfoHash, err = bencode.GetInfoHash(data)
-	tf.logger.Debug(fmt.Sprintf("Got info hash: %s\n", string(tf.InfoHash)))
 	if err != nil {
 		panic(err)
 	}
+	tf.logger.Debug(fmt.Sprintf("Got info hash: %s\n", string(tf.InfoHash)))
 
 	tokens, err := bencode.Tokenize(data)
 	if err != nil {

@@ -94,8 +94,10 @@ func (bf *Bitfield) SetBit(index int64) error {
 	}
 	byteIndex := index / 8
 	bitIndex := index % 8
-	bf.Bytes[byteIndex] = bf.Bytes[byteIndex] | (1 << (7 - bitIndex))
-	bf.NumSet++
+	if bf.Bytes[byteIndex]&(1<<(7-bitIndex)) == 0 {
+		bf.Bytes[byteIndex] = bf.Bytes[byteIndex] | (1 << (7 - bitIndex))
+		bf.NumSet++
+	}
 	bf.Complete = bf.NumSet == bf.len
 	return nil
 }
@@ -167,8 +169,8 @@ func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
 	return true
 }
 
-func (bfA *Bitfield) NumDiff(bfB *Bitfield) int {
-	diffCount := 0
+func (bfA *Bitfield) NumDiff(bfB *Bitfield) int64 {
+	diffCount := int64(0)
 	for i := range bfA.Bytes {
 		diff := bfA.Bytes[i] & ^bfB.Bytes[i]
 		for diff != 0 {

@@ -464,7 +464,7 @@ func (tracker *Tracker) udpConnect() error {
 		if err != nil {
 			netErr, ok := err.(net.Error)
 			if ok && netErr.Timeout() {
-				tracker.logger.Error(fmt.Sprintf("err (%d/5) reading udp tracker connect response: %v\n", tracker.timeoutStep, err))
+				tracker.logger.Warn(fmt.Sprintf("err (%d/5) reading udp tracker connect response: %v\n", tracker.timeoutStep, err))
 				tracker.timeoutStep++
 				continue
 			} else {

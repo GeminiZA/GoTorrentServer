@@ -51,7 +51,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
 		Complete:    false,
-		Path:        bundlePath,
+		Path:        filepath.Join(bundlePath, metaData.Info.Name),
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
 		logger:      logger.New(logger.WARN, "Bundle"),
@@ -197,7 +197,7 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
 		Complete:    false,
-		Path:        bundlePath,
+		Path:        filepath.Join(bundlePath, metaData.Info.Name),
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
 		logger:      logger.New(logger.ERROR, "Bundle"),

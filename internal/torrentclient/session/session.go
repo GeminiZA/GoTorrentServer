@@ -99,10 +99,14 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 	}
 	var bnd *bundle.Bundle
 	bnd, err := bundle.Load(tf, bf, path)
-	if os.IsNotExist(err) {
-		bnd, err = bundle.Create(tf, path)
-		if err != nil {
-			session.Error = err
+	if err != nil {
+		session.logger.Error(fmt.Sprintf("error loading bundle: %v", err))
+		if os.IsNotExist(err) {
+			bnd, err = bundle.Create(tf, path)
+			if err != nil {
+				session.logger.Error(fmt.Sprintf("error creating bundle: %v", err))
+				session.Error = err
+			}
 		}
 	}
 	session.Bundle = bnd

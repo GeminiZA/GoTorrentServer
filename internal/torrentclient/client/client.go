@@ -158,17 +158,22 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 	return nil
 }
 
-func (client *TorrentClient) AddTorrentFromString(metadata []byte, targetpath string, start bool) error {
+func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath string, start bool) error {
 	client.mux.Lock()
 	defer client.mux.Unlock()
 
-	client.logger.Debug("Adding Torrent from string")
+	client.logger.Debug("Adding Torrent from metadata")
 	tf := torrentfile.New()
 	err := tf.ParseFileString(&metadata)
 	if err != nil {
 		return err
 	}
-	client.logger.Debug("Successfully parsed torrent metadata string")
+	client.logger.Debug(fmt.Sprintf("Parsed metadata Successfully\nName: %s\nInfohash: %x", tf.Info.Name, tf.InfoHash))
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, tf.InfoHash) {
+			return errors.New("session already exists")
+		}
+	}
 	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr))
 	if err != nil {
 		return err
@@ -317,7 +322,6 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 	if seshIndex != -1 {
 		client.sessions = append(client.sessions[:seshIndex], client.sessions[seshIndex+1:]...)
 		client.bitfields = append(client.bitfields[:seshIndex], client.bitfields[seshIndex+1:]...)
-		err := client.dbc.RemoveTorrent(infoHash)
 		return err
 	} else {
 		return errors.New("session for infoHash not found")

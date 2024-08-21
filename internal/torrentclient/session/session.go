@@ -88,7 +88,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		timeLastResponsesQueued: time.Now(),
 		maxRequestsOutRate:      0,
 		maxResponsesOutRate:     0,
-		maxPeers:                10,
+		maxPeers:                50,
 		DownloadRateKB:          0,
 		UploadRateKB:            0,
 		BlockQueue:              make([]*blockRequest, 0, 256),
@@ -154,6 +154,13 @@ func (session *Session) Stop() {
 	session.TrackerList.Stop()
 }
 
+func (session *Session) SetMaxPeers(newMaxPeers int) {
+	session.mux.Lock()
+	defer session.mux.Unlock()
+
+	session.maxPeers = newMaxPeers
+}
+
 func (session *Session) SetMaxDownloadRate(rateKB float64) {
 	session.mux.Lock()
 	defer session.mux.Unlock()
@@ -191,6 +198,32 @@ func (session *Session) run() {
 			session.checkRequests()
 		} else { // Leeching
 
+			// Check for dead peers
+
+			{ // scope for i
+				i := 0
+				for i < len(session.ConnectedPeers) {
+					removed := false
+					pi := session.ConnectedPeers[i]
+					j := 0
+					for j < len(session.Peers) {
+						if session.Peers[j].RemoteIP == pi.IP && session.Peers[j].RemotePort == pi.Port {
+							if !session.Peers[j].Connected {
+								session.ConnectedPeers = append(session.ConnectedPeers[:i], session.ConnectedPeers[i+1:]...)
+								session.Peers = append(session.Peers[:j], session.Peers[j+1:]...)
+								removed = true
+							}
+							break
+						} else {
+							j++
+						}
+					}
+					if !removed {
+						i++
+					}
+				}
+			}
+
 			session.sortPeers()
 			session.calcRates()
 
@@ -221,10 +254,12 @@ func (session *Session) run() {
 				}
 			}
 
-			for _, curPeer := range session.Peers {
-				if float64(session.Bundle.Bitfield.NumDiff(curPeer.RemoteBitfield))/float64(session.Bundle.Bitfield.Len()) > 20 {
-					session.disconnectPeer(curPeer.RemotePeerID)
-					session.BannedPeers = append(session.BannedPeers, &tracker.PeerInfo{IP: curPeer.RemoteIP, Port: curPeer.RemotePort})
+			if len(session.ConnectedPeers) == session.maxPeers {
+				for _, curPeer := range session.Peers {
+					if curPeer.GetRelevance(session.Bundle.Bitfield) < 0.20 {
+						session.disconnectPeer(curPeer.RemotePeerID)
+						break
+					}
 				}
 			}
 
@@ -492,13 +527,11 @@ func (session *Session) findNewPeer() {
 	if len(session.UnconnectedPeers) == 0 {
 		return
 	}
-	j := 0
-	for j < len(session.UnconnectedPeers) {
+	for len(session.UnconnectedPeers) > 0 {
 		session.mux.Lock()
-		peerInfo := session.UnconnectedPeers[j]
+		peerInfo := session.UnconnectedPeers[0]
 		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
-		session.UnconnectedPeers = append(session.UnconnectedPeers[:j], session.UnconnectedPeers[j+1:]...)
-		session.ConnectingPeers = append(session.ConnectingPeers, peerInfo)
+		session.UnconnectedPeers = session.UnconnectedPeers[1:]
 		session.mux.Unlock()
 		session.logger.Debug(fmt.Sprintf("session trying to connect to peer(%s:%d)...\n", peerInfo.IP, peerInfo.Port))
 		err := session.connectPeer(peerInfo)
@@ -513,7 +546,6 @@ func (session *Session) findNewPeer() {
 				}
 				i++
 			}
-			j++
 			session.mux.Unlock()
 			session.logger.Debug(fmt.Sprintf("error connecting to peer: %v\n", err))
 		} else {
@@ -531,26 +563,6 @@ func (session *Session) findNewPeer() {
 			break
 		}
 	}
-}
-
-func (session *Session) AddPeer(incomingPeer *listenserver.IncomingPeer) {
-	if len(session.ConnectedPeers)+len(session.ConnectingPeers) >= session.maxPeers {
-		session.logger.Error(fmt.Sprintf("Error adding peer(%s): session full", incomingPeer.Conn.RemoteAddr().String()))
-		return
-	}
-	peer, err := peer.Add(incomingPeer.Conn, incomingPeer.InfoHash, session.peerID, session.Bundle.Bitfield, session.Bundle.NumPieces)
-	if err != nil {
-		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
-	}
-	peerAddrParts := strings.Split(incomingPeer.Conn.RemoteAddr().String(), ":")
-	peerPort, err := strconv.Atoi(peerAddrParts[1])
-	if err != nil {
-		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
-	}
-	session.mux.Lock()
-	session.Peers = append(session.Peers, peer)
-	session.ConnectedPeers = append(session.ConnectedPeers, &tracker.PeerInfo{IP: peerAddrParts[0], Port: peerPort})
-	session.mux.Unlock()
 }
 
 func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
@@ -575,7 +587,9 @@ func (session *Session) connectPeer(pi *tracker.PeerInfo) error {
 	if err != nil {
 		return err
 	}
+	session.mux.Lock()
 	session.Peers = append(session.Peers, peer)
+	session.mux.Unlock()
 	return nil
 }
 
@@ -585,10 +599,14 @@ func (session *Session) disconnectPeer(peerID []byte) error {
 
 	var peer *peer.Peer
 	var peerIndex int
+	var peerIP string
+	var peerPort int
 	for i, curPeer := range session.Peers {
 		if bytes.Equal(curPeer.RemotePeerID, peerID) {
 			peer = curPeer
 			peerIndex = i
+			peerIP = curPeer.RemoteIP
+			peerPort = curPeer.RemotePort
 		}
 	}
 	if peer == nil {
@@ -602,7 +620,38 @@ func (session *Session) disconnectPeer(peerID []byte) error {
 		}
 	}
 	session.Peers = append(session.Peers[:peerIndex], session.Peers[peerIndex+1:]...)
+	i := 0
+	for i < len(session.ConnectedPeers) {
+		pi := session.ConnectedPeers[i]
+		if pi.IP == peerIP && pi.Port == peerPort {
+			session.ConnectedPeers = append(session.ConnectedPeers[:i], session.ConnectedPeers[i+1:]...)
+			session.UnconnectedPeers = append(session.UnconnectedPeers, pi)
+			break
+		}
+		i++
+	}
+
 	return nil
+}
+
+func (session *Session) AddPeer(incomingPeer *listenserver.IncomingPeer) {
+	if len(session.ConnectedPeers)+len(session.ConnectingPeers) >= session.maxPeers {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): session full", incomingPeer.Conn.RemoteAddr().String()))
+		return
+	}
+	peer, err := peer.Add(incomingPeer.Conn, incomingPeer.InfoHash, session.peerID, session.Bundle.Bitfield, session.Bundle.NumPieces)
+	if err != nil {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
+	}
+	peerAddrParts := strings.Split(incomingPeer.Conn.RemoteAddr().String(), ":")
+	peerPort, err := strconv.Atoi(peerAddrParts[1])
+	if err != nil {
+		session.logger.Error(fmt.Sprintf("Error adding peer(%s): %v", incomingPeer.Conn.RemoteAddr().String(), err))
+	}
+	session.mux.Lock()
+	session.Peers = append(session.Peers, peer)
+	session.ConnectedPeers = append(session.ConnectedPeers, &tracker.PeerInfo{IP: peerAddrParts[0], Port: peerPort})
+	session.mux.Unlock()
 }
 
 func (session *Session) sortPeers() {

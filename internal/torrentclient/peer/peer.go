@@ -227,6 +227,8 @@ func Connect(
 
 	err = peer.sendHandshake()
 	if err != nil {
+		peer.conn.Close()
+		peer.Connected = false
 		return nil, err
 	}
 
@@ -468,6 +470,12 @@ func (peer *Peer) Have(pieceIndex int64) error {
 		peer.sendHave(uint32(pieceIndex))
 	}
 	return nil
+}
+
+func (peer *Peer) GetRelevance(bf *bitfield.Bitfield) float64 {
+	want := bf.Len() - bf.NumSet
+	peerHas := peer.RemoteBitfield.NumDiff(bf)
+	return float64(peerHas) / float64(want)
 }
 
 func (peer *Peer) runOutgoing() {

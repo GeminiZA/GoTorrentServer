@@ -109,7 +109,11 @@ func (tl *TrackerList) SetComplete() {
 }
 
 func (tl *TrackerList) GetPeers() []*tracker.PeerInfo {
+	tl.Seeders = 0
+	tl.Leechers = 0
 	for _, tr := range tl.Trackers {
+		tl.Seeders += int(tr.Seeders)
+		tl.Leechers += int(tr.Leechers)
 		for _, newPeer := range tr.Peers {
 			found := false
 			for _, oldPeer := range tl.Peers {

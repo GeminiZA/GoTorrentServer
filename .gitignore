@@ -3,4 +3,5 @@
 *.log
 ./test_folder*
 ./TestBundle
+./ClientTestBundle
 main

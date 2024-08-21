@@ -379,22 +379,26 @@ type TrackerInfo struct {
 type PeerInfo struct {
 	ID          string  `json:"peerid"`
 	Host        string  `json:"host"`
-	BitfieldHex string  `json:"bitfieldhex"`
-	Down        float64 `json:"down"`
-	Up          float64 `json:"up"`
-	Status      string  `json:"status"`
+	BitfieldB64 string  `json:"bitfield_base64"`
+	DownRate    float64 `json:"downrate"`
+	UpRate      float64 `json:"uprate"`
+	Downloaded  float64 `json:"downloaded"`
+	Uploaded    float64 `json:"uploaded"`
+	Connected   bool    `json:"connected"`
+	Relevance   float64 `json:"relevance"`
 }
 
 type SessionInfo struct {
 	Name           string        `json:"name"`
 	InfoHashB64    string        `json:"infohash_base64"`
 	BitfieldB64    string        `json:"bitfield_base64"`
-	BitFieldLength int           `json:"bitfield_length`
+	BitFieldLength int           `json:"bitfield_length"`
 	TimeStarted    string        `json:"time"`
 	Wasted         float64       `json:"wasted"`
 	Downloaded     float64       `json:"downloaded"`
 	Uploaded       float64       `json:"uploaded"`
 	Trackers       []TrackerInfo `json:"trackers"`
+	Peers          []PeerInfo    `json:"peers"`
 	Error          string        `json:"error"`
 }
 
@@ -418,7 +422,21 @@ func (client *TorrentClient) AllDataJSON() ([]byte, error) {
 			Downloaded:     sesh.TotalDownloadedKB,
 			Uploaded:       sesh.TotalUploadedKB,
 			Trackers:       make([]TrackerInfo, 0),
+			Peers:          make([]PeerInfo, 0),
 			Error:          fmt.Sprintf("%v", sesh.Error),
+		}
+		for _, peer := range sesh.Peers {
+			newSeshInfo.Peers = append(newSeshInfo.Peers, PeerInfo{
+				ID:          string(peer.RemotePeerID),
+				Host:        fmt.Sprintf("%s:%d", peer.RemoteIP, peer.RemotePort),
+				BitfieldB64: base64.StdEncoding.EncodeToString(peer.RemoteBitfield.Bytes),
+				DownRate:    peer.DownloadRateKB,
+				UpRate:      peer.UploadRateKB,
+				Downloaded:  float64(peer.TotalBytesDownloaded) / 1024,
+				Uploaded:    float64(peer.TotalBytesUploaded) / 1024,
+				Connected:   peer.Connected,
+				Relevance:   peer.GetRelevance(sesh.Bundle.Bitfield),
+			})
 		}
 		for _, tr := range sesh.TrackerList.Trackers {
 			trerr := tr.TrackerError
@@ -453,6 +471,19 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 				Trackers:       make([]TrackerInfo, 0),
 				Error:          fmt.Sprintf("%v", sesh.Error),
 			}
+			for _, peer := range sesh.Peers {
+				ret.Peers = append(ret.Peers, PeerInfo{
+					ID:          string(peer.RemotePeerID),
+					Host:        fmt.Sprintf("%s:%d", peer.RemoteIP, peer.RemotePort),
+					BitfieldB64: base64.StdEncoding.EncodeToString(peer.RemoteBitfield.Bytes),
+					DownRate:    peer.DownloadRateKB,
+					UpRate:      peer.UploadRateKB,
+					Downloaded:  float64(peer.TotalBytesDownloaded) / 1024,
+					Uploaded:    float64(peer.TotalBytesUploaded) / 1024,
+					Connected:   peer.Connected,
+					Relevance:   peer.GetRelevance(sesh.Bundle.Bitfield),
+				})
+			}
 			for _, tr := range sesh.TrackerList.Trackers {
 				trerr := tr.TrackerError
 				if trerr == nil {
@@ -474,7 +505,7 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 }
 
 func (client *TorrentClient) PrintStatus() {
-	ret := "Infohash\t\t\t\t\tConnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
+	ret := "Infohash\t\t\t\t\tConnected\tLeechers\tSeeders\t\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
 	for _, sesh := range client.sessions {
 		downloadedKiB := sesh.TotalDownloadedKB
 		var downloadedStr string
@@ -520,7 +551,13 @@ func (client *TorrentClient) PrintStatus() {
 		}
 		totalSizeStr := fmt.Sprintf("%.2f MiB", float64(sesh.Bundle.Length)/1024/1024)
 		totalSizeStr = fmt.Sprintf("%s%*s", totalSizeStr, 22-len(totalSizeStr), " ")
-		ret += fmt.Sprintf("%x\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
+		ret += fmt.Sprintf("%x\t%d\t\t%d\t\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), sesh.TrackerList.Leechers, sesh.TrackerList.Seeders, downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
+		ret += "Peers:\n"
+		ret += "\tID\t\t\t\t\t\tRelevance\n"
+		for _, peer := range sesh.Peers {
+			ret += fmt.Sprintf("\t%x\t%.2f\n", peer.RemotePeerID, peer.GetRelevance(sesh.Bundle.Bitfield))
+		}
+		ret += "--------------------------------------------------\n"
 	}
 	ret += "==================================================\n"
 	fmt.Print(ret)

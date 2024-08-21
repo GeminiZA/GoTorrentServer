@@ -170,9 +170,9 @@ func (bfA *Bitfield) HasAll(bfB *Bitfield) bool {
 func (bfA *Bitfield) NumDiff(bfB *Bitfield) int {
 	diffCount := 0
 	for i := range bfA.Bytes {
-		xor := bfA.Bytes[i] ^ bfB.Bytes[i]
-		for xor != 0 {
-			xor &= xor - 1
+		diff := bfA.Bytes[i] & ^bfB.Bytes[i]
+		for diff != 0 {
+			diff &= diff - 1
 			diffCount++
 		}
 	}

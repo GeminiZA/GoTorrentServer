@@ -4,14 +4,14 @@
 
 Torrent client with http endpoint interface for remote torrent management
 
-## Interface
-
-### Notes:
+## Notes:
 
 - Only supports sequential piece selection so far
 - No peer exchange (PEX) yet
 - No BitTorrent extensions yet (thus no magnet URIs)
 - Probably quite unstable
+
+## Interface
 
 ### Headers:
 

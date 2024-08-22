@@ -1,5 +1,4 @@
 // TODO:
-// Complete handshake and find session for infohash
 // Implement ICE and UPnP
 
 package listenserver
@@ -39,7 +38,7 @@ type IncomingPeer struct {
 	Conn        net.Conn
 }
 
-func New(internalPort uint16, externalPort uint16, externalIP string) (*ListenServer, error) {
+func New(internalPort uint16, externalPort uint16, externalIP string, peerChan chan *IncomingPeer) (*ListenServer, error) {
 	lp := ListenServer{
 		internalPort: internalPort,
 		initialized:  true,
@@ -47,7 +46,7 @@ func New(internalPort uint16, externalPort uint16, externalIP string) (*ListenSe
 		stopped:      true,
 		externalPort: externalPort,
 		externalIP:   externalIP,
-		PeerChan:     make(chan *IncomingPeer, 20),
+		PeerChan:     peerChan,
 		logger:       logger.New(logger.DEBUG, "ListenServer"),
 	}
 	return &lp, nil
@@ -58,7 +57,7 @@ func (ls *ListenServer) listen() {
 	// 	ls.initializeNAT()
 	// }
 	fmt.Printf("listenport started on port: %d\n", ls.internalPort)
-	listen, err := net.Listen("tcp", fmt.Sprintf("%d", ls.internalPort))
+	listen, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", ls.internalPort))
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -22,14 +22,20 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/trackerlist"
 )
 
+const (
+	STOPPED = 0
+	RUNNING = 1
+	ERROR   = 2
+)
+
 type Session struct {
 	Path        string
 	Bundle      *bundle.Bundle
 	TrackerList *trackerlist.TrackerList
 	tf          *torrentfile.TorrentFile
 
-	maxDownloadRateKB       float64
-	maxUploadRateKB         float64
+	MaxDownloadRateKB       float64
+	MaxUploadRateKB         float64
 	maxRequestsOutRate      float64
 	maxResponsesOutRate     float64
 	timeLastRequestsQueued  time.Time
@@ -53,9 +59,9 @@ type Session struct {
 	BlockQueue    []*blockRequest
 	BlockQueueMax int
 
-	running bool
-	Error   error
-	mux     sync.Mutex
+	Status int
+	Error  error
+	mux    sync.Mutex
 
 	logger *logger.Logger
 }
@@ -82,8 +88,8 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		tf:                      tf,
 		listenPort:              listenPort,
 		peerID:                  peerID,
-		maxDownloadRateKB:       0,
-		maxUploadRateKB:         0,
+		MaxDownloadRateKB:       0,
+		MaxUploadRateKB:         0,
 		timeLastRequestsQueued:  time.Now(),
 		timeLastResponsesQueued: time.Now(),
 		maxRequestsOutRate:      0,
@@ -93,7 +99,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 		UploadRateKB:            0,
 		BlockQueue:              make([]*blockRequest, 0, 256),
 		BlockQueueMax:           256,
-		running:                 false,
+		Status:                  STOPPED,
 
 		logger: logger.New(logger.ERROR, "Session"),
 	}
@@ -106,6 +112,7 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 			if err != nil {
 				session.logger.Error(fmt.Sprintf("error creating bundle: %v", err))
 				session.Error = err
+				session.Status = ERROR
 			}
 		}
 	}
@@ -124,9 +131,10 @@ func New(path string, tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, listen
 
 func (session *Session) Start() error {
 	if session.Error != nil {
+		session.Status = ERROR
 		return fmt.Errorf("cannot start session in error state: %v", session.Error)
 	}
-	session.running = true
+	session.Status = RUNNING
 
 	err := session.TrackerList.Start()
 	if err != nil {
@@ -142,7 +150,7 @@ func (session *Session) Stop() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	session.running = false
+	session.Status = 0
 
 	for _, req := range session.BlockQueue {
 		session.Bundle.CancelBlock(&req.Info)
@@ -169,7 +177,7 @@ func (session *Session) SetMaxDownloadRate(rateKB float64) {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	session.maxDownloadRateKB = rateKB
+	session.MaxDownloadRateKB = rateKB
 	session.maxRequestsOutRate = rateKB / float64(16)
 }
 
@@ -177,12 +185,12 @@ func (session *Session) SetMaxUploadRate(rateKB float64) {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	session.maxUploadRateKB = rateKB
+	session.MaxUploadRateKB = rateKB
 	session.maxResponsesOutRate = rateKB / float64(16)
 }
 
 func (session *Session) Recheck() error {
-	if session.running {
+	if session.Status == RUNNING {
 		session.Stop()
 	}
 	err := session.Bundle.Recheck()
@@ -196,7 +204,7 @@ func (session *Session) Recheck() error {
 // Internal
 
 func (session *Session) run() {
-	for session.running {
+	for session.Status == RUNNING {
 		if session.Bundle.Complete { // Seeding
 			// Assign responses
 			session.checkRequests()
@@ -355,14 +363,14 @@ func (session *Session) checkRequests() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if session.maxUploadRateKB == 0 || session.UploadRateKB < session.maxUploadRateKB {
+	if session.MaxUploadRateKB == 0 || session.UploadRateKB < session.MaxUploadRateKB {
 		now := time.Now()
 		added := false
 		timeSinceLastResponsesQueues := now.Sub(session.timeLastResponsesQueued)
 		numBlocksCanQueue := int(float64(timeSinceLastResponsesQueues.Milliseconds()/1000) * session.maxResponsesOutRate)
 		for _, curPeer := range session.Peers {
 			numRequestsIn := curPeer.NumRequestsIn()
-			if session.maxUploadRateKB != 0 {
+			if session.MaxUploadRateKB != 0 {
 				if numBlocksCanQueue < numRequestsIn {
 					numRequestsIn = numBlocksCanQueue
 				}
@@ -457,7 +465,7 @@ func (session *Session) assignParts() {
 	session.mux.Lock()
 	defer session.mux.Unlock()
 
-	if session.maxDownloadRateKB == 0 || session.DownloadRateKB < session.maxDownloadRateKB {
+	if session.MaxDownloadRateKB == 0 || session.DownloadRateKB < session.MaxDownloadRateKB {
 		now := time.Now()
 		timeSinceLastRequestsQueued := now.Sub(session.timeLastRequestsQueued)
 		numBlocksCanQueue := int(float64(timeSinceLastRequestsQueued.Milliseconds()/1000) * session.maxRequestsOutRate)
@@ -468,7 +476,7 @@ func (session *Session) assignParts() {
 			if curPeer.RemoteChoking || numCanAdd == 0 {
 				continue
 			}
-			if session.maxDownloadRateKB != 0 {
+			if session.MaxDownloadRateKB != 0 {
 				if numCanAdd > int(numBlocksCanQueue) {
 					numCanAdd = int(numBlocksCanQueue)
 				}
@@ -658,6 +666,7 @@ func (session *Session) AddPeer(incomingPeer *listenserver.IncomingPeer) {
 	}
 	session.mux.Lock()
 	session.Peers = append(session.Peers, peer)
+	session.logger.Error(fmt.Sprintf("Session added peer %s", peer.RemotePeerID))
 	session.ConnectedPeers = append(session.ConnectedPeers, &tracker.PeerInfo{IP: peerAddrParts[0], Port: peerPort})
 	session.mux.Unlock()
 }

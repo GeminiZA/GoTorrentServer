@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,20 +21,17 @@ import (
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/torrentfile"
 )
 
-const (
-	ListenPort uint16 = 6881
-	PeerIDStr  string = "-TR2940-6oFw2M6BdUkY"
-)
-
 type TorrentClient struct {
 	sessions     []*session.Session
 	bitfields    []*bitfield.Bitfield
 	dbc          *database.DBConn
 	listenServer *listenserver.ListenServer // peerInChan   chan<- *peer.Peer
+	peerInChan   chan *listenserver.IncomingPeer
+	peerID       string
 	running      bool
 	mux          sync.Mutex
 
-	torrentPort int
+	torrentPort    int
 	maxConnections int
 
 	logger *logger.Logger
@@ -44,19 +42,20 @@ func Start(
 	dbPath string,
 	maxConnections int,
 ) (*TorrentClient, error) {
-	fmt.Printf("Listen port not implemented: port %d\n", torrentPort)
 	var err error
 	client := &TorrentClient{
-		sessions: make([]*session.Session, 0),
-		logger:   logger.New(logger.DEBUG, "TorrentClient"),
-		// peerInChan: make(chan<- *peer.Peer, 10),
+		sessions:       make([]*session.Session, 0),
+		logger:         logger.New(logger.DEBUG, "TorrentClient"),
+		peerInChan:     make(chan *listenserver.IncomingPeer, 10),
 		maxConnections: maxConnections,
-		torrentPort: torrentPort,
+		torrentPort:    torrentPort,
 	}
 	client.dbc, err = database.Connect(dbPath)
 	if err != nil {
 		return nil, err
 	}
+
+	client.generatePeerID()
 
 	infoHashes, err := client.dbc.GetAllInfoHashes()
 	if err != nil {
@@ -90,8 +89,8 @@ func Start(
 			path,
 			tf,
 			bf,
-			ListenPort,
-			[]byte(PeerIDStr),
+			uint16(torrentPort),
+			[]byte(client.peerID),
 			client.maxConnections,
 		)
 		if err != nil {
@@ -117,10 +116,14 @@ func Start(
 	}
 	client.running = true
 	go client.runClient()
-	// client.listenServer, err = listenserver.New(ListenPort, client.peerInChan)
-	//	if err != nil {
-	// 	return client, err
-	// }
+	client.listenServer, err = listenserver.New(uint16(client.torrentPort), 0, "127.0.0.1", client.peerInChan)
+	if err != nil {
+		return client, err
+	}
+	err = client.listenServer.Start()
+	if err != nil {
+		return client, err
+	}
 	return client, nil
 }
 
@@ -150,18 +153,18 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 			return errors.New("torrent already exists in client")
 		}
 	}
-	err = client.dbc.AddTorrent(tf, bitfield.New(int64(len(tf.Info.Pieces))), targetPath, 0, 0, 1)
+	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), uint16(client.torrentPort), []byte(client.peerID), client.maxConnections)
 	if err != nil {
 		return err
 	}
-	newSesh, err := session.New(targetPath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr), client.maxConnections)
+	err = client.dbc.AddTorrent(tf, newSesh.Bundle.Bitfield, targetPath, newSesh.MaxDownloadRateKB, newSesh.MaxUploadRateKB, newSesh.Status)
 	if err != nil {
 		return err
 	}
 	client.sessions = append(client.sessions, newSesh)
 	client.bitfields = append(client.bitfields, newSesh.Bundle.Bitfield.Clone())
 	if start {
-		err = newSesh.Start()
+		err = client.StartTorrent(tf.InfoHash)
 		if err != nil {
 			return err
 		}
@@ -185,14 +188,18 @@ func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath 
 			return errors.New("session already exists")
 		}
 	}
-	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), ListenPort, []byte(PeerIDStr), client.maxConnections)
+	newSesh, err := session.New(targetpath, tf, bitfield.New(int64(len(tf.Info.Pieces))), uint16(client.torrentPort), []byte(client.peerID), client.maxConnections)
+	if err != nil {
+		return err
+	}
+	err = client.dbc.AddTorrent(tf, newSesh.Bundle.Bitfield, targetpath, newSesh.MaxDownloadRateKB, newSesh.MaxUploadRateKB, newSesh.Status)
 	if err != nil {
 		return err
 	}
 	client.sessions = append(client.sessions, newSesh)
 	client.bitfields = append(client.bitfields, newSesh.Bundle.Bitfield.Clone())
 	if start {
-		err = newSesh.Start()
+		err = client.StartTorrent(tf.InfoHash)
 		if err != nil {
 			return err
 		}
@@ -340,7 +347,7 @@ func (client *TorrentClient) RemoveTorrent(infoHash []byte, delete bool) error {
 }
 
 func (client *TorrentClient) runClient() {
-	// go client.processIncomingClients()
+	go client.processIncomingClients()
 	for client.running {
 		client.updateDatabase()
 		time.Sleep(time.Millisecond * 1000)
@@ -395,7 +402,7 @@ type TrackerInfo struct {
 type PeerInfo struct {
 	ID             string  `json:"peerid"`
 	Host           string  `json:"host"`
-	BitfieldB64    string  `json:"bitfield_base64"`
+	BitfieldB64    string  `json:"bitfield_bajk64"`
 	BitfieldLength int     `json:"bitfield_length"`
 	DownRate       float64 `json:"downrate"`
 	UpRate         float64 `json:"uprate"`
@@ -523,6 +530,16 @@ func (client *TorrentClient) TorrentDataJSON(infohash []byte) ([]byte, error) {
 	return nil, errors.New("infohash not found in sessions")
 }
 
+func (client *TorrentClient) generatePeerID() {
+	name := "GTS-"
+	time := time.Now()
+	temp := []byte(name + time.String())
+	hasher := sha1.New()
+	hasher.Write(temp)
+	hash := hasher.Sum(nil)
+	client.peerID = fmt.Sprintf("GTS-%s", base64.StdEncoding.EncodeToString(hash)[0:16])
+}
+
 func (client *TorrentClient) PrintStatus() {
 	ret := "Infohash\t\t\t\t\tConnected\tConnecting\tUnconnected\tDownloaded            Uploaded              Download Rate         Upload Rate           Size                  Progress\n"
 	for _, sesh := range client.sessions {
@@ -570,7 +587,7 @@ func (client *TorrentClient) PrintStatus() {
 		}
 		totalSizeStr := fmt.Sprintf("%.2f MiB", float64(sesh.Bundle.Length)/1024/1024)
 		totalSizeStr = fmt.Sprintf("%s%*s", totalSizeStr, 22-len(totalSizeStr), " ")
-		ret += fmt.Sprintf("%x\t%d\t\t%d\t\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), len(sesh.ConnectingPeers), len(sesh.UnconnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
+		ret += fmt.Sprintf("%x\t\t%d\t\t%d\t\t%d\t\t%s%s%s%s%s%.2f%%\n", sesh.Bundle.InfoHash, len(sesh.ConnectedPeers), len(sesh.ConnectingPeers), len(sesh.UnconnectedPeers), downloadedStr, uploadedStr, downrateStr, uprateStr, totalSizeStr, float64(sesh.Bundle.Bitfield.NumSet*100)/float64(sesh.Bundle.Bitfield.Len()))
 	}
 	ret += "==================================================\n"
 	fmt.Print(ret)

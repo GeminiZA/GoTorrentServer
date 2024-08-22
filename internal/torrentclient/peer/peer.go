@@ -147,7 +147,7 @@ func Add(
 		conn:   conn,
 	}
 
-	err = peer.readHandshake()
+	err = peer.sendHandshake()
 	if err != nil {
 		peer.conn.Close()
 		peer.Connected = false

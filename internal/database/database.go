@@ -315,7 +315,7 @@ func (dbc *DBConn) UpdateBitfield(infoHash []byte, bf *bitfield.Bitfield) error 
 	return nil
 }
 
-func (dbc *DBConn) AddTorrent(tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, path string, downloadrate_max int, uploadrate_max int, status int) error {
+func (dbc *DBConn) AddTorrent(tf *torrentfile.TorrentFile, bf *bitfield.Bitfield, path string, downloadrate_max float64, uploadrate_max float64, status int) error {
 	dbc.mux.Lock()
 	defer dbc.mux.Unlock()
 

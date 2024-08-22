@@ -20,10 +20,10 @@ import (
 )
 
 type Config struct {
-	TorrentPort int `json:"torrent_port"`
-	DBPath string `json:"db_path"`
-	MaxConnections int `json:"max_connections"`
-	APIPort int `json:"api_port"`
+	TorrentPort    int    `json:"torrent_port"`
+	DBPath         string `json:"db_path"`
+	MaxConnections int    `json:"max_connections"`
+	APIPort        int    `json:"api_port"`
 }
 
 func main() {
@@ -67,9 +67,9 @@ func main() {
 
 	cfg := Config{
 		MaxConnections: 50,
-		TorrentPort: 6681,
-		DBPath: "./gotorrentserver.db",
-		APIPort: 8080,
+		TorrentPort:    6681,
+		DBPath:         "./gotorrentserver.db",
+		APIPort:        8080,
 	}
 	cfgFile, err := os.OpenFile("./config.json", os.O_RDONLY, 0644)
 	if err != nil {

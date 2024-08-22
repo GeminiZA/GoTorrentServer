@@ -16,9 +16,15 @@ import (
 	"time"
 
 	"github.com/GeminiZA/GoTorrentServer/internal/logger"
+	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bencode"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bitfield"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/peer/message"
+)
+
+const (
+	EXTENSION_LT_METADATA byte = 1
+	EXTENSION_UT_PEX      byte = 2
 )
 
 type blockResponse struct {
@@ -56,6 +62,8 @@ type Peer struct {
 	RemotePeerID   []byte
 	RemoteIP       string
 	RemotePort     int
+	myIP           string
+	myPort         int
 	peerID         []byte
 	infoHash       []byte
 	bitField       *bitfield.Bitfield
@@ -94,6 +102,14 @@ type Peer struct {
 
 	TimeConnected time.Time
 	logger        *logger.Logger
+
+	// extensions
+	remoteName         string
+	myName             string
+	extensionsEnabled  bool
+	remoteExtensionIDs map[byte]byte
+	maxReq             int
+	metadataSize       int64
 }
 
 func Add(
@@ -629,6 +645,7 @@ func (peer *Peer) readHandshake() error {
 
 	peer.logger.Debug(fmt.Sprintf("Handshake successfully read from peer(%s)...\n", peer.RemoteIP))
 	peer.RemotePeerID = handshakeMsg.PeerID
+	peer.extensionsEnabled = handshakeMsg.ExtensionsEnabled
 	//	if peer.RemotePeerID != handshakeMsg.PeerID {
 	//return errors.New("peerID mismatch")
 	//}
@@ -755,7 +772,74 @@ func (peer *Peer) handleMessageIn(msg *message.Message) error {
 			i++
 		}
 	case message.PORT:
-		// Not implemented
+	// Not implemented
+	case message.EXTENDED:
+		if msg.ExtensionID == 0 { // Extended Handshake
+			tokens, err := bencode.Tokenize(&msg.Contents)
+			if err != nil {
+				return err
+			}
+			dict, err := bencode.ParseDict(tokens)
+			if err != nil {
+				return err
+			}
+			// Handle extensions
+			extensionsDictInterface, ok := dict["m"]
+			if ok {
+				extensionsDict, ok := extensionsDictInterface.(map[string]interface{})
+				if ok {
+					// metadata extension
+					metaDataExtensionIDInterface, ok := extensionsDict["LT_metadata"]
+					if ok {
+						metaDataExtensionID, ok := metaDataExtensionIDInterface.(byte)
+						if ok {
+							peer.remoteExtensionIDs[metaDataExtensionID] = EXTENSION_LT_METADATA
+						}
+					}
+					// Other extensions
+				}
+			}
+			if newRemotePortInterface, ok := dict["p"]; ok {
+				if newRemotePort, ok := newRemotePortInterface.(int64); ok {
+					peer.RemotePort = int(newRemotePort)
+				}
+			}
+			if nameInterface, ok := dict["v"]; ok {
+				if name, ok := nameInterface.(string); ok {
+					peer.remoteName = name
+				}
+			}
+			if myIPInterface, ok := dict["yourip"]; ok {
+				if myIP, ok := myIPInterface.(string); ok {
+					peer.myIP = myIP
+				}
+			}
+			if remoteIPInterface, ok := dict["ipv4"]; ok {
+				if remoteIP, ok := remoteIPInterface.(string); ok {
+					peer.RemoteIP = remoteIP
+				}
+			}
+			if remoteIPInterface, ok := dict["ipv4"]; ok {
+				if remoteIP, ok := remoteIPInterface.(string); ok {
+					peer.RemoteIP = remoteIP
+				}
+			}
+			if maxReqInterface, ok := dict["reqq"]; ok {
+				if maxReq, ok := maxReqInterface.(int64); ok {
+					peer.maxReq = int(maxReq)
+				}
+			}
+			if metadataSizeInterface, ok := dict["metadata_size"]; ok {
+				if metadataSize, ok := metadataSizeInterface.(int64); ok {
+					peer.metadataSize = metadataSize
+				}
+			}
+		} else { // is an extension
+			switch peer.remoteExtensionIDs[msg.ExtensionID] { // fetches the local extension IDs
+			case EXTENSION_LT_METADATA:
+				// Handle metadata message
+			}
+		}
 	default:
 		return errors.New("unknown message type")
 	}

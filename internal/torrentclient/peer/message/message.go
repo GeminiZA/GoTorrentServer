@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/GeminiZA/GoTorrentServer/internal/debugopts"
 	"github.com/GeminiZA/GoTorrentServer/internal/torrentclient/bundle"
 )
 
@@ -26,19 +25,24 @@ const (
 	CANCEL
 	PORT // for DHT
 	HANDSHAKE
+	EXTENDED
+	EXTENDED_HANDSHAKE
 )
 
 type Message struct {
-	Type     MessageType
-	Index    uint32
-	Length   uint32
-	BitField []byte
-	Begin    uint32
-	Piece    []byte
-	Port     uint32
-	PeerID   []byte
-	InfoHash []byte
-	Reserved []byte
+	Type              MessageType
+	Index             uint32
+	Length            uint32
+	BitField          []byte
+	Begin             uint32
+	Piece             []byte
+	Port              uint32
+	PeerID            []byte
+	InfoHash          []byte
+	Reserved          []byte
+	ExtensionID       byte
+	Contents          []byte
+	ExtensionsEnabled bool
 }
 
 func (m *Message) GetBytes() []byte {
@@ -127,6 +131,11 @@ func (m *Message) GetBytes() []byte {
 		ret = append(ret, infoHash...)
 		ret = append(ret, peerID...)
 		return ret
+	case EXTENDED:
+		ret := make([]byte, 4)
+		ret = append(ret, m.ExtensionID)
+		binary.BigEndian.PutUint32(ret, uint32(len(m.Contents))+1)
+		return ret
 	}
 	return nil
 }
@@ -144,17 +153,10 @@ func ParseHandshake(bytes []byte) (*Message, error) {
 	if pstr != "BitTorrent protocol" {
 		return nil, errors.New("invalid protocol string")
 	}
-	if debugopts.MESSAGE_DEBUG {
-		handshakeBytes := make([]byte, 0)
-		handshakeBytes = append(handshakeBytes, pstrlen)
-		handshakeBytes = append(handshakeBytes, []byte(pstr)...)
-		handshakeBytes = append(handshakeBytes, bytes[20:28]...)
-		handshakeBytes = append(handshakeBytes, bytes[28:48]...)
-		handshakeBytes = append(handshakeBytes, bytes[48:68]...)
-	}
 	msg.Reserved = bytes[20:28]
 	msg.InfoHash = bytes[28:48]
 	msg.PeerID = bytes[48:68]
+	msg.ExtensionsEnabled = msg.Reserved[5]&0x10 == 0x10
 	return &msg, nil
 }
 
@@ -203,6 +205,9 @@ func ParseMessage(msgBytes []byte) (*Message, error) {
 	case 9: // port
 		port := binary.BigEndian.Uint32(msgBytes[5:9])
 		return &Message{Type: PORT, Port: port}, nil
+	case 20: // extended
+		extendedID := msgBytes[0]
+		return &Message{Type: EXTENDED, ExtensionID: extendedID, Contents: msgBytes[1:]}, nil
 	}
 	return nil, errors.New("invalid message id")
 }
@@ -239,6 +244,8 @@ func (msg *Message) Print() string {
 		ret += fmt.Sprintf("{Type: port, port: %d}\n", msg.Port)
 	case HANDSHAKE:
 		ret += fmt.Sprintf("Type: handshake, peerID: %s\n", msg.PeerID)
+	case EXTENDED:
+		ret += fmt.Sprintf("{Type: extended, extendedID: %d, contents: %s}\n", msg.ExtensionID, msg.Contents)
 	}
 	return ret
 }
@@ -247,6 +254,12 @@ func NewHandshake(infoHash []byte, peerID []byte) *Message {
 	msg := Message{Type: HANDSHAKE}
 	msg.InfoHash = infoHash
 	msg.PeerID = peerID
+	return &msg
+}
+
+func NewExtended(extendedID byte, contents []byte) *Message {
+	msg := Message{Type: EXTENDED}
+	msg.Contents = contents
 	return &msg
 }
 

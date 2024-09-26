@@ -1,6 +1,8 @@
 # GoTorrentServer
 
-Torrent client with http endpoint interface for remote torrent management
+Torrent client with full implementation of BitTorrent Protocol 1.0 and http endpoint interface for remote torrent management
+
+I wanted to be able to manage torrent sessions from my phone while on the move, so I built this client to interface with a website through a reverse proxy.
 
 ## Notes:
 
@@ -8,6 +10,12 @@ Torrent client with http endpoint interface for remote torrent management
 - No peer exchange (PEX) yet
 - No BitTorrent extensions yet (thus no magnet URIs)
 - Probably quite unstable
+
+## Quickstart
+
+1. Clone the repo
+2. Build using go build .
+3. Run ./GoTorrentServer
 
 ## Interface
 
@@ -190,3 +198,28 @@ All endpoints need the following headers:
   - rate: max upload rate in KiB/s
 
 - Returns status only
+
+## Contributing
+
+### Clone the repo
+
+```bash
+git clone https://github.com/GeminiZA/GoTorrentServer
+cd GoTorrentServer
+```
+
+### Build the project
+
+```bash
+go build .
+```
+
+### Run the project
+
+```bash
+./GoTorrentServer
+```
+
+### Submit a pull request
+
+If you would like to contribute, please fork the repository and open a pull request to the 'main' branch

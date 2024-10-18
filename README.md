@@ -9,7 +9,6 @@ I wanted to be able to manage torrent sessions from my phone while on the move, 
 - Only supports sequential piece selection so far
 - No peer exchange (PEX) yet
 - No BitTorrent extensions yet (thus no magnet URIs)
-- Probably quite unstable
 
 ## Quickstart
 

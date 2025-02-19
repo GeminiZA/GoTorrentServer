@@ -68,9 +68,8 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 	if metaData.Info.Length == 0 {
 		bundle.MultiFile = true
 		// if multifile append torrent name to path
-		bundle.Path = filepath.Join(bundlePath, metaData.Info.Name)
-		if _, err := os.Stat(bundle.Path); err != nil {
-			err := os.MkdirAll(bundle.Path, 0755)
+		if _, err := os.Stat(filepath.Join(bundlePath, metaData.Info.Name)); err != nil {
+			err := os.MkdirAll(filepath.Join(bundlePath, metaData.Info.Name), 0755)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +78,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 		bundle.Files = make([]*BundleFile, 0)
 		for _, file := range metaData.Info.Files {
 			curBundleFile := BundleFile{
-				Path:      bundle.Path,
+				Path:      filepath.Join(bundlePath, metaData.Info.Name),
 				Length:    file.Length,
 				ByteStart: curByte,
 			}

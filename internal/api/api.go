@@ -159,6 +159,11 @@ func AddTorrentFile(w http.ResponseWriter, r *http.Request, tc *client.TorrentCl
 		return
 	}
 	fmt.Println("Read body...")
+	if len(body) < 2 {
+		http.Error(w, "No body provided", http.StatusInternalServerError)
+		logResponse("addtorrentfile", remoteHost, http.StatusInternalServerError)
+		return
+	}
 	err = tc.AddTorrentFromMetadata(body, path, start)
 	if err != nil {
 		http.Error(w, "Error adding torrent", http.StatusInternalServerError)

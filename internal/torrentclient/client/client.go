@@ -178,6 +178,7 @@ func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath 
 	defer client.mux.Unlock()
 
 	client.logger.Debug("Adding Torrent from metadata")
+	fmt.Println("Metadata:", metadata)
 	tf := torrentfile.New()
 	err := tf.ParseFileString(&metadata)
 	if err != nil {

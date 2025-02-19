@@ -51,7 +51,7 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
 		Complete:    false,
-		Path:        filepath.Join(bundlePath, metaData.Info.Name),
+		Path:        bundlePath,
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
 		logger:      logger.New(logger.WARN, "Bundle"),
@@ -67,6 +67,14 @@ func Create(metaData *torrentfile.TorrentFile, bundlePath string) (*Bundle, erro
 	// Files
 	if metaData.Info.Length == 0 {
 		bundle.MultiFile = true
+		// if multifile append torrent name to path
+		bundle.Path = filepath.Join(bundlePath, metaData.Info.Name)
+		if _, err := os.Stat(bundle.Path); err != nil {
+			err := os.MkdirAll(bundle.Path, 0755)
+			if err != nil {
+				return nil, err
+			}
+		}
 		curByte := int64(0)
 		bundle.Files = make([]*BundleFile, 0)
 		for _, file := range metaData.Info.Files {
@@ -197,7 +205,7 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 		Name:        metaData.Info.Name,
 		PieceLength: metaData.Info.PieceLength,
 		Complete:    false,
-		Path:        filepath.Join(bundlePath, metaData.Info.Name),
+		Path:        bundlePath,
 		pieceCache:  NewPieceCache(1280), // 1280 * 16 KiB: 20 MiB
 		InfoHash:    metaData.InfoHash,
 		logger:      logger.New(logger.ERROR, "Bundle"),
@@ -209,6 +217,7 @@ func Load(metaData *torrentfile.TorrentFile, bf *bitfield.Bitfield, bundlePath s
 	// Files
 	if metaData.Info.Length == 0 {
 		bundle.MultiFile = true
+		bundle.Path = filepath.Join(bundlePath, metaData.Info.Name)
 		curByte := int64(0)
 		bundle.Files = make([]*BundleFile, 0)
 		for _, file := range metaData.Info.Files {
@@ -296,7 +305,8 @@ func (bundle *Bundle) writePiece(pieceIndex int64) error { // Private and only c
 	piece := bundle.Pieces[pieceIndex]
 	bytes := piece.GetBytes()
 	if !bundle.MultiFile {
-		file, err := os.OpenFile(bundle.Name, os.O_WRONLY, 0755)
+		bundleFile := bundle.Files[0]
+		file, err := os.OpenFile(bundleFile.Path, os.O_WRONLY, 0755)
 		if err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -164,7 +165,7 @@ func (client *TorrentClient) AddTorrentFromFile(torrentfilePath string, targetPa
 	client.sessions = append(client.sessions, newSesh)
 	client.bitfields = append(client.bitfields, newSesh.Bundle.Bitfield.Clone())
 	if start {
-		err = client.StartTorrent(tf.InfoHash)
+		err = client.startTorrent(tf.InfoHash)
 		if err != nil {
 			return err
 		}
@@ -182,7 +183,7 @@ func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath 
 	if err != nil {
 		return err
 	}
-	client.logger.Debug(fmt.Sprintf("Parsed metadata Successfully\nName: %s\nInfohash: %x", tf.Info.Name, tf.InfoHash))
+	client.logger.Debug(fmt.Sprintf("Parsed metadata Successfully; Name: %s\tInfohash: %x", tf.Info.Name, tf.InfoHash))
 	for _, sesh := range client.sessions {
 		if bytes.Equal(sesh.Bundle.InfoHash, tf.InfoHash) {
 			return errors.New("session already exists")
@@ -192,18 +193,21 @@ func (client *TorrentClient) AddTorrentFromMetadata(metadata []byte, targetpath 
 	if err != nil {
 		return err
 	}
+	client.logger.Debug("Created new session")
 	err = client.dbc.AddTorrent(tf, newSesh.Bundle.Bitfield, targetpath, newSesh.MaxDownloadRateKB, newSesh.MaxUploadRateKB, newSesh.Status)
 	if err != nil {
 		return err
 	}
+	client.logger.Debug("Added Torrent")
 	client.sessions = append(client.sessions, newSesh)
 	client.bitfields = append(client.bitfields, newSesh.Bundle.Bitfield.Clone())
 	if start {
-		err = client.StartTorrent(tf.InfoHash)
+		err = client.startTorrent(tf.InfoHash)
 		if err != nil {
 			return err
 		}
 	}
+	client.logger.Debug("Started Torrent")
 	return nil
 }
 
@@ -216,6 +220,8 @@ func (client *TorrentClient) StartTorrent(infoHash []byte) error {
 	client.mux.Lock()
 	defer client.mux.Unlock()
 
+	client.logger.Debug("Starting Torrent")
+
 	if len(infoHash) != 20 {
 		return errors.New("invalid InfoHash")
 	}
@@ -223,6 +229,27 @@ func (client *TorrentClient) StartTorrent(infoHash []byte) error {
 	if err != nil {
 		return err
 	}
+	client.logger.Debug("Updated Torrent Status")
+	for _, sesh := range client.sessions {
+		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
+			sesh.Start()
+			return nil
+		}
+	}
+	return errors.New("session doesn't exist")
+}
+
+func (client *TorrentClient) startTorrent(infoHash []byte) error {
+	client.logger.Debug("Starting Torrent")
+
+	if len(infoHash) != 20 {
+		return errors.New("invalid InfoHash")
+	}
+	err := client.dbc.UpdateTorrentStatus(infoHash, 1)
+	if err != nil {
+		return err
+	}
+	client.logger.Debug("Updated Torrent Status")
 	for _, sesh := range client.sessions {
 		if bytes.Equal(sesh.Bundle.InfoHash, infoHash) {
 			sesh.Start()
@@ -431,6 +458,13 @@ type AllInfo struct {
 	Sessions []SessionInfo `json:"sessions"`
 }
 
+func sanitizeFloat(a float64) float64 {
+	if math.IsNaN(a) {
+		return 0
+	}
+	return a
+}
+
 func (client *TorrentClient) AllDataJSON() ([]byte, error) {
 	ret := AllInfo{
 		Time:     time.Now().String(),
@@ -442,9 +476,9 @@ func (client *TorrentClient) AllDataJSON() ([]byte, error) {
 			InfoHashB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.InfoHash),
 			BitfieldB64:    base64.StdEncoding.EncodeToString(sesh.Bundle.Bitfield.Bytes),
 			BitFieldLength: int(sesh.Bundle.Bitfield.Len()),
-			Wasted:         0,
-			Downloaded:     sesh.TotalDownloadedKB,
-			Uploaded:       sesh.TotalUploadedKB,
+			Wasted:         sanitizeFloat(0),
+			Downloaded:     sanitizeFloat(sesh.TotalDownloadedKB),
+			Uploaded:       sanitizeFloat(sesh.TotalUploadedKB),
 			Trackers:       make([]TrackerInfo, 0),
 			Peers:          make([]PeerInfo, 0),
 			Error:          fmt.Sprintf("%v", sesh.Error),
@@ -455,12 +489,12 @@ func (client *TorrentClient) AllDataJSON() ([]byte, error) {
 				Host:           fmt.Sprintf("%s:%d", peer.RemoteIP, peer.RemotePort),
 				BitfieldB64:    base64.StdEncoding.EncodeToString(peer.RemoteBitfield.Bytes),
 				BitfieldLength: int(peer.RemoteBitfield.Len()),
-				DownRate:       peer.DownloadRateKB,
-				UpRate:         peer.UploadRateKB,
-				Downloaded:     float64(peer.TotalBytesDownloaded) / 1024,
-				Uploaded:       float64(peer.TotalBytesUploaded) / 1024,
+				DownRate:       sanitizeFloat(peer.DownloadRateKB),
+				UpRate:         sanitizeFloat(peer.UploadRateKB),
+				Downloaded:     sanitizeFloat(float64(peer.TotalBytesDownloaded) / 1024),
+				Uploaded:       sanitizeFloat(float64(peer.TotalBytesUploaded) / 1024),
 				Connected:      peer.Connected,
-				Relevance:      peer.GetRelevance(sesh.Bundle.Bitfield),
+				Relevance:      sanitizeFloat(peer.GetRelevance(sesh.Bundle.Bitfield)),
 			})
 		}
 		for _, tr := range sesh.TrackerList.Trackers {

@@ -143,24 +143,29 @@ func AddTorrentFile(w http.ResponseWriter, r *http.Request, tc *client.TorrentCl
 	}
 	values := r.URL.Query()
 	path := values.Get("path")
+	fmt.Println("Got path from request:", path)
 	if path == "" {
 		http.Error(w, "Path missing", http.StatusUnprocessableEntity)
 		logResponse("addtorrentfile", remoteHost, http.StatusUnprocessableEntity)
 		return
 	}
 	start := values.Get("start") != "false" // true if ommitted
+	fmt.Println("Got start from request:", start)
+	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Error reading request body", http.StatusInternalServerError)
 		logResponse("addtorrentfile", remoteHost, http.StatusInternalServerError)
 		return
 	}
+	fmt.Println("Read body...")
 	err = tc.AddTorrentFromMetadata(body, path, start)
 	if err != nil {
 		http.Error(w, "Error adding torrent", http.StatusInternalServerError)
 		logResponse("addtorrentfile", remoteHost, http.StatusInternalServerError)
 		return
 	}
+	fmt.Println("Added Torrent...")
 	w.WriteHeader(http.StatusOK)
 	logResponse("addtorrentfile", remoteHost, http.StatusOK)
 }

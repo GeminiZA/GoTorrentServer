@@ -61,6 +61,7 @@ func main() {
 		} else {
 			fmt.Println("Server not implemented")
 		}
+		return
 	}
 
 	// else run server
@@ -216,7 +217,8 @@ func TestPeer(tfPath string, myPeerID []byte) {
 			nextBlocks = append(nextBlocks, bdl.NextNBlocks(numBlocksNeeded)...)
 			fmt.Printf("Blocks to be requested (Added %d):\n", numBlocksNeeded)
 			fmt.Printf("Current bitfield: ")
-			bdl.Bitfield.Print()
+			fmt.Println(bdl.Bitfield.Print())
+			fmt.Printf("Peer choking: %v\n", curPeer.RemoteChoking)
 			for _, block := range nextBlocks {
 				fmt.Printf("(%d, %d, %d)\n", block.PieceIndex, block.BeginOffset, block.Length)
 			}
